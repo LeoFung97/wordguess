@@ -232,7 +232,7 @@ export default function LobbyPage() {
           <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-1">
             <StatCard label="在线玩家" value={room.players.length} />
             <StatCard label="总猜测" value={room.attempts} />
-            <StatCard label="最佳分数" value={room.bestGuess?.similarity.toFixed(2) ?? "0.00"} />
+            <StatCard label="最佳热度" value={room.bestGuess?.proximity.toFixed(2) ?? "0.00"} />
           </div>
 
           <div className="rounded-[2rem] border border-white/10 bg-white/[0.06] p-5 backdrop-blur">

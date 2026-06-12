@@ -9,24 +9,24 @@ type GameSession = {
   solved: boolean;
 };
 
-function percentileToTemperature(percentile: number, isCorrect: boolean): GuessTemperature {
+function rankToTemperature(rank: number, isCorrect: boolean): GuessTemperature {
   if (isCorrect) {
     return "solved";
   }
 
-  if (percentile >= 99.9) {
+  if (rank <= 10) {
     return "burning";
   }
 
-  if (percentile >= 99) {
+  if (rank <= 100) {
     return "hot";
   }
 
-  if (percentile >= 95) {
+  if (rank <= 1000) {
     return "warm";
   }
 
-  if (percentile >= 75) {
+  if (rank <= 5000) {
     return "cold";
   }
 
@@ -62,9 +62,9 @@ function toGuessResult(session: GameSession, ranked: RankedWord, playerName?: st
     playerName,
     attempt: session.guesses.length + 1,
     similarity,
-    percentile: ranked.percentile,
+    proximity: ranked.proximity,
     rank: ranked.rank,
-    temperature: percentileToTemperature(ranked.percentile, isCorrect),
+    temperature: rankToTemperature(ranked.rank, isCorrect),
     isCorrect,
     createdAt: Date.now(),
   };

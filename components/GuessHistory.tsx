@@ -21,8 +21,8 @@ function sortGuesses(guesses: GuessResult[], view: SortView) {
   });
 }
 
-function formatPercentile(percentile: number) {
-  return Number.isInteger(percentile) ? percentile.toString() : percentile.toFixed(2);
+function formatProximity(proximity: number) {
+  return Number.isInteger(proximity) ? proximity.toString() : proximity.toFixed(2);
 }
 
 export function GuessHistory({ guesses, emptyText = "还没有猜词，试试第一个词。" }: GuessHistoryProps) {
@@ -83,14 +83,14 @@ export function GuessHistory({ guesses, emptyText = "还没有猜词，试试第
               ) : null}
             </div>
             <div className="shrink-0 text-right">
-              <p className="text-lg font-bold leading-none text-teal-200">{formatPercentile(guess.percentile)}%</p>
-              <p className="mt-0.5 text-[10px] text-white/45">接近度</p>
+              <p className="text-lg font-bold leading-none text-teal-200">{formatProximity(guess.proximity)}</p>
+              <p className="mt-0.5 text-[10px] text-white/45">热度</p>
             </div>
           </div>
           <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10">
             <div
               className="h-full rounded-full bg-gradient-to-r from-cyan-300 via-teal-300 to-emerald-300"
-              style={{ width: `${guess.percentile}%` }}
+              style={{ width: `${guess.proximity}%` }}
             />
           </div>
           <div className="mt-1.5 flex items-center justify-between text-[10px] text-white/45">

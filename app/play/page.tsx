@@ -94,7 +94,7 @@ export default function PlayPage() {
     setGame(result.state);
   }
 
-  const bestScore = useMemo(() => game?.bestGuess?.similarity.toFixed(2) ?? "0.00", [game]);
+  const bestScore = useMemo(() => game?.bestGuess?.proximity.toFixed(2) ?? "0.00", [game]);
 
   return (
     <main className="mx-auto min-h-screen w-full max-w-6xl px-6 py-8">
@@ -129,7 +129,7 @@ export default function PlayPage() {
 
           <div className="mt-7 grid gap-4 sm:grid-cols-3 lg:grid-cols-1">
             <StatCard label="尝试次数" value={game?.attempts ?? 0} />
-            <StatCard label="最佳分数" value={bestScore} />
+            <StatCard label="最佳热度" value={bestScore} />
             <StatCard label="状态" value={game?.solved ? "已命中" : "寻找中"} />
           </div>
 

@@ -15,7 +15,7 @@ type StoredWordEntry = {
 export type RankedWord = {
   word: string;
   similarity: number;
-  percentile: number;
+  proximity: number;
   rank: number;
 };
 
@@ -89,6 +89,19 @@ function loadStoredEntries(): WordVectorEntry[] {
   }));
 }
 
+function rankToProximity(rank: number, totalWords: number) {
+  if (rank <= 1) {
+    return 100;
+  }
+
+  if (totalWords <= 1) {
+    return 0;
+  }
+
+  const score = 100 * (1 - Math.log(rank) / Math.log(totalWords));
+  return Math.min(99.99, Math.max(0, Math.round(score * 100) / 100));
+}
+
 export class VectorStore {
   private readonly entries: WordVectorEntry[];
   private readonly byWord: Map<string, WordVectorEntry>;
@@ -147,7 +160,7 @@ export class VectorStore {
     return ranked.map((entry, index) => ({
       ...entry,
       rank: index + 1,
-      percentile: Math.max(0, Math.round((1 - index / (ranked.length - 1)) * 10000) / 100),
+      proximity: rankToProximity(index + 1, ranked.length),
     }));
   }
 
