@@ -38,13 +38,24 @@ export default function LobbyPage() {
   const [room, setRoom] = useState<PublicRoom>();
   const [error, setError] = useState("");
   const [isJoining, setIsJoining] = useState(false);
+  const [isHinting, setIsHinting] = useState(false);
   const socketRef = useRef<Socket | null>(null);
+  const roomRef = useRef<PublicRoom | undefined>(undefined);
+  const playerNameRef = useRef(playerName);
 
   useEffect(() => {
     return () => {
       socketRef.current?.disconnect();
     };
   }, []);
+
+  useEffect(() => {
+    roomRef.current = room;
+  }, [room]);
+
+  useEffect(() => {
+    playerNameRef.current = playerName;
+  }, [playerName]);
 
   const shareUrl = useMemo(() => {
     if (!room || typeof window === "undefined") {
@@ -58,6 +69,25 @@ export default function LobbyPage() {
     if (!socketRef.current) {
       const socket = io();
       socket.on("room:update", (nextRoom: PublicRoom) => setRoom(nextRoom));
+      socket.on("connect", () => {
+        const currentRoom = roomRef.current;
+        if (!currentRoom) {
+          return;
+        }
+
+        socket.emit(
+          "room:join",
+          { roomCode: currentRoom.roomCode, playerName: playerNameRef.current },
+          (result: Ack<PublicRoom>) => {
+            if (!result.ok) {
+              setError(result.error);
+              return;
+            }
+
+            setRoom(result.data);
+          },
+        );
+      });
       socketRef.current = socket;
     }
 
@@ -109,6 +139,21 @@ export default function LobbyPage() {
     });
   }
 
+  async function revealHint() {
+    if (!room || room.solved || isHinting) {
+      return;
+    }
+
+    setError("");
+    setIsHinting(true);
+    getSocket().emit("hint:request", { roomCode: room.roomCode }, (result: Ack<{ guess: GuessResult }>) => {
+      setIsHinting(false);
+      if (!result.ok) {
+        setError(result.error);
+      }
+    });
+  }
+
   async function copyShareUrl() {
     if (!shareUrl) {
       return;
@@ -157,12 +202,21 @@ export default function LobbyPage() {
         <Link href="/" className="text-lg font-bold tracking-[0.4em] text-teal-100">
           字距
         </Link>
-        <button
-          onClick={() => void copyShareUrl()}
-          className="rounded-full border border-white/10 bg-white/[0.06] px-4 py-2 text-sm text-white/70 transition hover:bg-white/[0.1]"
-        >
-          复制邀请链接
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => void revealHint()}
+            disabled={room.solved || isHinting}
+            className="rounded-full border border-white/10 bg-white/[0.06] px-4 py-2 text-sm text-white/70 transition hover:bg-white/[0.1] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isHinting ? "提示中" : "提示"}
+          </button>
+          <button
+            onClick={() => void copyShareUrl()}
+            className="rounded-full border border-white/10 bg-white/[0.06] px-4 py-2 text-sm text-white/70 transition hover:bg-white/[0.1]"
+          >
+            复制邀请链接
+          </button>
+        </div>
       </nav>
 
       <section className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
@@ -178,7 +232,7 @@ export default function LobbyPage() {
           <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-1">
             <StatCard label="在线玩家" value={room.players.length} />
             <StatCard label="总猜测" value={room.attempts} />
-            <StatCard label="最佳分数" value={room.bestGuess?.similarity.toFixed(2) ?? "0.00"} />
+            <StatCard label="最佳热度" value={room.bestGuess?.proximity.toFixed(2) ?? "0.00"} />
           </div>
 
           <div className="rounded-[2rem] border border-white/10 bg-white/[0.06] p-5 backdrop-blur">

@@ -116,6 +116,24 @@ export function registerLobbyHandlers(io: Server) {
       },
     );
 
+    socket.on("hint:request", (payload: { roomCode?: string }, ack: ClientAck<{ guess: GuessResult }>) => {
+      const roomCode = payload.roomCode?.trim().toUpperCase() || socket.data.roomCode;
+      const room = roomCode ? rooms.get(roomCode) : undefined;
+
+      if (!room) {
+        ack({ ok: false, error: "无法生成提示。" });
+        return;
+      }
+
+      try {
+        const result = gameEngine.revealHintInSession(room.session);
+        ack({ ok: true, data: { guess: result.guess } });
+        io.to(room.roomCode).emit("room:update", publicRoom(room));
+      } catch (error) {
+        ack({ ok: false, error: error instanceof Error ? error.message : "提示失败。" });
+      }
+    });
+
     socket.on("disconnect", () => {
       const roomCode = socket.data.roomCode;
       const room = roomCode ? rooms.get(roomCode) : undefined;

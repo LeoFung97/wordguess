@@ -1,20 +1,41 @@
-import sampleWords from "../../data/sample-words.json";
+import { readFileSync } from "fs";
+import path from "path";
 import targetWords from "../../data/target-words.json";
 import type { WordVectorEntry } from "./types";
 
 const TWO_CHARACTER_CHINESE = /^[\u4e00-\u9fff]{2}$/u;
+const vectorDataPath = path.join(process.cwd(), "data", "vectors.f32");
+const wordDataPath = path.join(process.cwd(), "data", "words.json");
 
-function magnitude(vector: number[]) {
-  return Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
+type StoredWordEntry = {
+  word: string;
+  commonness: number;
+};
+
+export type RankedWord = {
+  word: string;
+  similarity: number;
+  proximity: number;
+  rank: number;
+};
+
+function magnitude(vector: ArrayLike<number>) {
+  let sum = 0;
+
+  for (let index = 0; index < vector.length; index += 1) {
+    sum += vector[index] * vector[index];
+  }
+
+  return Math.sqrt(sum);
 }
 
-export function normalizeVector(vector: number[]) {
+export function normalizeVector(vector: ArrayLike<number>) {
   const length = magnitude(vector);
   if (length === 0) {
     throw new Error("Cannot normalize a zero-length vector.");
   }
 
-  return vector.map((value) => value / length);
+  return Array.from({ length: vector.length }, (_, index) => vector[index] / length);
 }
 
 export function isTwoCharacterChineseWord(word: string) {
@@ -25,12 +46,60 @@ export function normalizeWord(word: string) {
   return word.trim().replace(/\s+/g, "");
 }
 
-export function cosineSimilarity(first: number[], second: number[]) {
+export function cosineSimilarity(first: ArrayLike<number>, second: ArrayLike<number>) {
   if (first.length !== second.length) {
     throw new Error("Vectors must have the same dimensions.");
   }
 
-  return first.reduce((sum, value, index) => sum + value * second[index], 0);
+  let sum = 0;
+
+  for (let index = 0; index < first.length; index += 1) {
+    sum += first[index] * second[index];
+  }
+
+  return sum;
+}
+
+function toFloat32Array(buffer: Buffer) {
+  if (buffer.byteOffset % Float32Array.BYTES_PER_ELEMENT === 0) {
+    return new Float32Array(buffer.buffer, buffer.byteOffset, buffer.byteLength / Float32Array.BYTES_PER_ELEMENT);
+  }
+
+  const bytes = new Uint8Array(buffer.byteLength);
+  bytes.set(buffer);
+  return new Float32Array(bytes.buffer);
+}
+
+function loadStoredEntries(): WordVectorEntry[] {
+  const words = JSON.parse(readFileSync(wordDataPath, "utf8")) as StoredWordEntry[];
+  const vectors = toFloat32Array(readFileSync(vectorDataPath));
+
+  if (words.length === 0) {
+    return [];
+  }
+
+  if (vectors.length % words.length !== 0) {
+    throw new Error("Vector data does not align with word metadata.");
+  }
+
+  const vectorLength = vectors.length / words.length;
+  return words.map((entry, index) => ({
+    ...entry,
+    vector: vectors.subarray(index * vectorLength, (index + 1) * vectorLength),
+  }));
+}
+
+function rankToProximity(rank: number, totalWords: number) {
+  if (rank <= 1) {
+    return 100;
+  }
+
+  if (totalWords <= 1) {
+    return 0;
+  }
+
+  const score = 100 * (1 - Math.log(rank) / Math.log(totalWords));
+  return Math.min(99.99, Math.max(0, Math.round(score * 100) / 100));
 }
 
 export class VectorStore {
@@ -38,13 +107,13 @@ export class VectorStore {
   private readonly byWord: Map<string, WordVectorEntry>;
   private readonly targetEntries: WordVectorEntry[];
 
-  constructor(entries: WordVectorEntry[], targetWordList?: string[]) {
+  constructor(entries: WordVectorEntry[], targetWordList?: string[], options: { vectorsAreNormalized?: boolean } = {}) {
     this.entries = entries
       .filter((entry) => isTwoCharacterChineseWord(entry.word))
       .map((entry) => ({
         ...entry,
         word: normalizeWord(entry.word),
-        vector: normalizeVector(entry.vector),
+        vector: options.vectorsAreNormalized ? entry.vector : normalizeVector(entry.vector),
       }))
       .sort((first, second) => second.commonness - first.commonness);
     this.byWord = new Map(this.entries.map((entry) => [entry.word, entry]));
@@ -75,11 +144,9 @@ export class VectorStore {
     return targetPool[Math.floor(Math.random() * targetPool.length)];
   }
 
-  rankAgainstTarget(targetWord: string, guessWord: string) {
+  rankedWordsAgainstTarget(targetWord: string): RankedWord[] | undefined {
     const target = this.get(targetWord);
-    const guess = this.get(guessWord);
-
-    if (!target || !guess) {
+    if (!target) {
       return undefined;
     }
 
@@ -90,15 +157,22 @@ export class VectorStore {
       }))
       .sort((first, second) => second.similarity - first.similarity);
 
-    const rank = ranked.findIndex((entry) => entry.word === guess.word) + 1;
-    const percentile = Math.max(0, Math.round((1 - (rank - 1) / (ranked.length - 1)) * 100));
+    return ranked.map((entry, index) => ({
+      ...entry,
+      rank: index + 1,
+      proximity: rankToProximity(index + 1, ranked.length),
+    }));
+  }
 
-    return {
-      rank,
-      percentile,
-      similarity: ranked[rank - 1]?.similarity ?? 0,
-    };
+  rankAgainstTarget(targetWord: string, guessWord: string) {
+    const guess = this.get(guessWord);
+    const ranked = this.rankedWordsAgainstTarget(targetWord);
+    if (!guess || !ranked) {
+      return undefined;
+    }
+
+    return ranked.find((entry) => entry.word === guess.word);
   }
 }
 
-export const vectorStore = new VectorStore(sampleWords, targetWords);
+export const vectorStore = new VectorStore(loadStoredEntries(), targetWords, { vectorsAreNormalized: true });

@@ -1,6 +1,6 @@
 export type WordVectorEntry = {
   word: string;
-  vector: number[];
+  vector: ArrayLike<number>;
   commonness: number;
 };
 
@@ -16,7 +16,7 @@ export type GuessResult = {
   word: string;
   attempt: number;
   similarity: number;
-  percentile: number;
+  proximity: number;
   rank: number;
   temperature: GuessTemperature;
   isCorrect: boolean;
