@@ -38,7 +38,7 @@ export default function LobbyPage() {
   const [room, setRoom] = useState<PublicRoom>();
   const [error, setError] = useState("");
   const [isJoining, setIsJoining] = useState(false);
-  const socketRef = useRef<Socket>();
+  const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
     return () => {
