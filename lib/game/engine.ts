@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import type { CreateGameResult, GuessResult, GuessTemperature, PublicGameState } from "./types";
-import { normalizeWord, vectorStore, type VectorStore } from "./vector-store";
+import { normalizeWord, vectorStore, type RankedWord, type VectorStore } from "./vector-store";
 
 type GameSession = {
   gameId: string;
@@ -9,24 +9,24 @@ type GameSession = {
   solved: boolean;
 };
 
-function scoreToTemperature(score: number, isCorrect: boolean): GuessTemperature {
+function percentileToTemperature(percentile: number, isCorrect: boolean): GuessTemperature {
   if (isCorrect) {
     return "solved";
   }
 
-  if (score >= 85) {
+  if (percentile >= 99.9) {
     return "burning";
   }
 
-  if (score >= 70) {
+  if (percentile >= 99) {
     return "hot";
   }
 
-  if (score >= 52) {
+  if (percentile >= 95) {
     return "warm";
   }
 
-  if (score >= 34) {
+  if (percentile >= 75) {
     return "cold";
   }
 
@@ -40,7 +40,7 @@ export function formatSimilarity(rawSimilarity: number) {
 export function bestGuess(guesses: GuessResult[]) {
   return guesses
     .filter((guess) => !guess.isCorrect)
-    .toSorted((first, second) => second.similarity - first.similarity)[0];
+    .toSorted((first, second) => first.rank - second.rank)[0];
 }
 
 export function toPublicGameState(session: GameSession): PublicGameState {
@@ -50,6 +50,23 @@ export function toPublicGameState(session: GameSession): PublicGameState {
     bestGuess: bestGuess(session.guesses),
     solved: session.solved,
     attempts: session.guesses.length,
+  };
+}
+
+function toGuessResult(session: GameSession, ranked: RankedWord, playerName?: string): GuessResult {
+  const isCorrect = ranked.word === session.targetWord;
+  const similarity = formatSimilarity(ranked.similarity);
+
+  return {
+    word: ranked.word,
+    playerName,
+    attempt: session.guesses.length + 1,
+    similarity,
+    percentile: ranked.percentile,
+    rank: ranked.rank,
+    temperature: percentileToTemperature(ranked.percentile, isCorrect),
+    isCorrect,
+    createdAt: Date.now(),
   };
 }
 
@@ -98,6 +115,15 @@ export class GameEngine {
     return this.submitGuessToSession(session, rawWord, playerName);
   }
 
+  revealHint(gameId: string) {
+    const session = this.sessions.get(gameId);
+    if (!session) {
+      throw new Error("找不到这一局游戏。");
+    }
+
+    return this.revealHintInSession(session);
+  }
+
   submitGuessToSession(session: GameSession, rawWord: string, playerName?: string) {
     if (session.solved) {
       throw new Error("这一局已经结束。");
@@ -117,22 +143,40 @@ export class GameEngine {
       throw new Error("无法计算这个词的语义距离。");
     }
 
-    const isCorrect = word === session.targetWord;
-    const similarity = formatSimilarity(ranked.similarity);
-    const guess: GuessResult = {
-      word,
-      playerName,
-      attempt: session.guesses.length + 1,
-      similarity,
-      percentile: ranked.percentile,
-      rank: ranked.rank,
-      temperature: scoreToTemperature(similarity, isCorrect),
-      isCorrect,
-      createdAt: Date.now(),
-    };
+    const guess = toGuessResult(session, ranked, playerName);
 
     session.guesses.push(guess);
-    session.solved = session.solved || isCorrect;
+    session.solved = session.solved || guess.isCorrect;
+
+    return {
+      guess,
+      state: toPublicGameState(session),
+    };
+  }
+
+  revealHintInSession(session: GameSession) {
+    if (session.solved) {
+      throw new Error("这一局已经结束。");
+    }
+
+    const ranked = this.store.rankedWordsAgainstTarget(session.targetWord);
+    if (!ranked) {
+      throw new Error("无法生成提示。");
+    }
+
+    const guessedWords = new Set(session.guesses.map((guess) => guess.word));
+    const bestRank = bestGuess(session.guesses)?.rank ?? ranked.length;
+    const targetRank = Math.max(2, Math.floor(bestRank * 0.6));
+    const hint =
+      ranked.find((entry) => entry.rank >= targetRank && entry.word !== session.targetWord && !guessedWords.has(entry.word)) ??
+      ranked.find((entry) => entry.rank > 1 && entry.word !== session.targetWord && !guessedWords.has(entry.word));
+
+    if (!hint) {
+      throw new Error("没有可用提示了。");
+    }
+
+    const guess = toGuessResult(session, hint, "提示");
+    session.guesses.push(guess);
 
     return {
       guess,

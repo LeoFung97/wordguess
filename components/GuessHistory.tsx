@@ -21,6 +21,10 @@ function sortGuesses(guesses: GuessResult[], view: SortView) {
   });
 }
 
+function formatPercentile(percentile: number) {
+  return Number.isInteger(percentile) ? percentile.toString() : percentile.toFixed(2);
+}
+
 export function GuessHistory({ guesses, emptyText = "还没有猜词，试试第一个词。" }: GuessHistoryProps) {
   const [view, setView] = useState<SortView>("latest");
   const orderedGuesses = useMemo(() => sortGuesses(guesses, view), [guesses, view]);
@@ -79,19 +83,19 @@ export function GuessHistory({ guesses, emptyText = "还没有猜词，试试第
               ) : null}
             </div>
             <div className="shrink-0 text-right">
-              <p className="text-lg font-bold leading-none text-teal-200">{guess.similarity.toFixed(2)}</p>
-              <p className="mt-0.5 text-[10px] text-white/45">相似度</p>
+              <p className="text-lg font-bold leading-none text-teal-200">{formatPercentile(guess.percentile)}%</p>
+              <p className="mt-0.5 text-[10px] text-white/45">接近度</p>
             </div>
           </div>
           <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10">
             <div
               className="h-full rounded-full bg-gradient-to-r from-cyan-300 via-teal-300 to-emerald-300"
-              style={{ width: `${Math.min(100, guess.similarity)}%` }}
+              style={{ width: `${guess.percentile}%` }}
             />
           </div>
           <div className="mt-1.5 flex items-center justify-between text-[10px] text-white/45">
             <span>第 {guess.attempt} 次</span>
-            <span>排名 #{guess.rank} · 超过 {guess.percentile}% 词汇</span>
+            <span>排名 #{guess.rank} · 相似度 {guess.similarity.toFixed(2)}</span>
           </div>
         </article>
       ))}

@@ -12,10 +12,13 @@ type GuessResponse = {
   error?: string;
 };
 
+type HintResponse = GuessResponse;
+
 export default function PlayPage() {
   const [game, setGame] = useState<CreateGameResult | PublicGameState>();
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+  const [isHinting, setIsHinting] = useState(false);
 
   async function startGame() {
     setIsLoading(true);
@@ -72,6 +75,25 @@ export default function PlayPage() {
     return true;
   }
 
+  async function revealHint() {
+    if (!game || game.solved || isHinting) {
+      return;
+    }
+
+    setError("");
+    setIsHinting(true);
+    const response = await fetch(`/api/games/${game.gameId}/hints`, { method: "POST" });
+    const result = (await response.json()) as HintResponse;
+    setIsHinting(false);
+
+    if (!response.ok) {
+      setError(result.error ?? "提示失败。");
+      return;
+    }
+
+    setGame(result.state);
+  }
+
   const bestScore = useMemo(() => game?.bestGuess?.similarity.toFixed(2) ?? "0.00", [game]);
 
   return (
@@ -80,12 +102,21 @@ export default function PlayPage() {
         <Link href="/" className="text-lg font-bold tracking-[0.4em] text-teal-100">
           字距
         </Link>
-        <button
-          onClick={() => void startGame()}
-          className="rounded-full border border-white/10 bg-white/[0.06] px-4 py-2 text-sm text-white/70 transition hover:bg-white/[0.1]"
-        >
-          新开一局
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => void revealHint()}
+            disabled={isLoading || !game || game.solved || isHinting}
+            className="rounded-full border border-white/10 bg-white/[0.06] px-4 py-2 text-sm text-white/70 transition hover:bg-white/[0.1] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isHinting ? "提示中" : "提示"}
+          </button>
+          <button
+            onClick={() => void startGame()}
+            className="rounded-full border border-white/10 bg-white/[0.06] px-4 py-2 text-sm text-white/70 transition hover:bg-white/[0.1]"
+          >
+            新开一局
+          </button>
+        </div>
       </nav>
 
       <section className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">

@@ -10,6 +10,11 @@ type PreparedEntry = {
   vector: number[];
 };
 
+type PreparedWord = {
+  word: string;
+  commonness: number;
+};
+
 const twoCharacterChinese = /^[\u4e00-\u9fff]{2}$/u;
 
 function getArg(name: string, fallback?: string) {
@@ -42,9 +47,24 @@ function createInputStream(filePath: string) {
   return filePath.endsWith(".gz") ? stream.pipe(createGunzip()) : stream;
 }
 
+function toFloat32Buffer(entries: PreparedEntry[]) {
+  const vectorLength = entries[0]?.vector.length ?? 0;
+  const vectors = new Float32Array(entries.length * vectorLength);
+
+  entries.forEach((entry, entryIndex) => {
+    entry.vector.forEach((value, vectorIndex) => {
+      vectors[entryIndex * vectorLength + vectorIndex] = value;
+    });
+  });
+
+  return Buffer.from(vectors.buffer);
+}
+
 async function main() {
   const input = getArg("input");
   const output = getArg("output", "data/prepared-words.json");
+  const wordsOutput = getArg("words-output");
+  const vectorsOutput = getArg("vectors-output");
   const commonWordsPath = getArg("common");
   const limit = Number(getArg("limit", "5000"));
 
@@ -90,6 +110,20 @@ async function main() {
   }
 
   const outputPath = path.resolve(output);
+  if (wordsOutput && vectorsOutput) {
+    const wordsPath = path.resolve(wordsOutput);
+    const vectorsPath = path.resolve(vectorsOutput);
+    const words: PreparedWord[] = entries.map(({ word, commonness }) => ({ word, commonness }));
+
+    await mkdir(path.dirname(wordsPath), { recursive: true });
+    await mkdir(path.dirname(vectorsPath), { recursive: true });
+    await writeFile(wordsPath, `${JSON.stringify(words, null, 2)}\n`, "utf8");
+    await writeFile(vectorsPath, toFloat32Buffer(entries));
+    console.log(`Prepared ${entries.length} two-character words at ${wordsPath}`);
+    console.log(`Prepared vectors at ${vectorsPath}`);
+    return;
+  }
+
   await mkdir(path.dirname(outputPath), { recursive: true });
   await writeFile(outputPath, `${JSON.stringify(entries, null, 2)}\n`, "utf8");
   console.log(`Prepared ${entries.length} two-character words at ${outputPath}`);

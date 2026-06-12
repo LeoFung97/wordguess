@@ -71,6 +71,16 @@ describe("game engine", () => {
     expect(engine.submitGuess(game.gameId, "城市").guess.isCorrect).toBe(true);
   });
 
+  it("reveals a non-answer hint as a system guess", () => {
+    const engine = new GameEngine(testStore);
+    const session = engine.createSharedSession("朋友");
+    const result = engine.revealHintInSession(session);
+
+    expect(result.guess.word).not.toBe("朋友");
+    expect(result.guess.playerName).toBe("提示");
+    expect(result.state.guesses).toHaveLength(1);
+  });
+
   it("formats negative similarities as zero", () => {
     expect(formatSimilarity(-0.5)).toBe(0);
   });

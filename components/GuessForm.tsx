@@ -16,7 +16,7 @@ const toSimplifiedChinese = Converter({ from: "tw", to: "cn" });
 export function GuessForm({
   onGuess,
   disabled = false,
-  placeholder = "输入两个汉字",
+  placeholder = "输入两个汉字，可用拼音或注音输入法",
   buttonLabel = "提交",
 }: GuessFormProps) {
   const [word, setWord] = useState("");
@@ -55,7 +55,7 @@ export function GuessForm({
         <input
           value={word}
           onChange={(event) => {
-            setWord(event.target.value.slice(0, 8));
+            setWord(event.target.value);
             setFormError("");
           }}
           disabled={disabled || isSubmitting}

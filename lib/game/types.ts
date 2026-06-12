@@ -1,6 +1,6 @@
 export type WordVectorEntry = {
   word: string;
-  vector: number[];
+  vector: ArrayLike<number>;
   commonness: number;
 };
 
