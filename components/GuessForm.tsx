@@ -10,13 +10,13 @@ type GuessFormProps = {
   buttonLabel?: string;
 };
 
-const twoCharacterChineseWord = /^[\u4e00-\u9fff]{2}$/u;
 const toSimplifiedChinese = Converter({ from: "tw", to: "cn" });
+const MAX_WORD_LENGTH = 4;
 
 export function GuessForm({
   onGuess,
   disabled = false,
-  placeholder = "输入两个汉字，可用拼音或注音输入法",
+  placeholder = "输入 1 到 4 个字，可用拼音或注音输入法",
   buttonLabel = "提交",
 }: GuessFormProps) {
   const [word, setWord] = useState("");
@@ -31,8 +31,8 @@ export function GuessForm({
       return;
     }
 
-    if (!twoCharacterChineseWord.test(simplifiedWord)) {
-      setFormError("请输入两个汉字。");
+    if (simplifiedWord.length < 1 || simplifiedWord.length > MAX_WORD_LENGTH) {
+      setFormError(`请输入 1 到 ${MAX_WORD_LENGTH} 个字。`);
       return;
     }
 

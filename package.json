@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "prepare:vectors": "tsx scripts/prepare-vectors.ts",
-    "prepare:fasttext": "tsx scripts/prepare-vectors.ts --input=data/raw/cc.zh.300.vec.gz --words-output=data/words.json --vectors-output=data/vectors.f32 --limit=50000"
+    "prepare:tencent": "tsx scripts/prepare-vectors.ts --input=data/raw/light_Tencent_AILab_ChineseEmbedding.bin --words-output=data/words.json --vectors-output=data/vectors.f32 --max-four-char-words=10000",
+    "prepare:tencent:full": "tsx scripts/prepare-vectors.ts --input=data/raw/Tencent_AILab_ChineseEmbedding.txt --words-output=data/words.json --vectors-output=data/vectors.f32"
   },
   "dependencies": {
     "@next/eslint-plugin-next": "latest",

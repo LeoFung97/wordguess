@@ -95,7 +95,9 @@ export function GuessHistory({ guesses, emptyText = "还没有猜词，试试第
           </div>
           <div className="mt-1.5 flex items-center justify-between text-[10px] text-white/45">
             <span>第 {guess.attempt} 次</span>
-            <span>排名 #{guess.rank} · 相似度 {guess.similarity.toFixed(2)}</span>
+            <span>
+              排名 #{guess.rank} · 前 {guess.percentile.toFixed(1)}% · 相似度 {guess.similarity.toFixed(2)}
+            </span>
           </div>
         </article>
       ))}

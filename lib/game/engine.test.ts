@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { GameEngine, formatSimilarity } from "./engine";
-import { cosineSimilarity, isTwoCharacterChineseWord, normalizeVector, VectorStore } from "./vector-store";
+import {
+  computeProximity,
+  cosineSimilarity,
+  normalizeVector,
+  rankToPercentile,
+  VectorStore,
+} from "./vector-store";
 
 const testStore = new VectorStore([
   { word: "朋友", commonness: 10, vector: [1, 0, 0] },
@@ -18,10 +24,34 @@ describe("vector helpers", () => {
     expect(cosineSimilarity(vector, vector)).toBeCloseTo(1);
   });
 
-  it("accepts only two-character Chinese words", () => {
-    expect(isTwoCharacterChineseWord("朋友")).toBe(true);
-    expect(isTwoCharacterChineseWord("朋友们")).toBe(false);
-    expect(isTwoCharacterChineseWord("AI")).toBe(false);
+  it("keeps words up to four characters", () => {
+    const store = new VectorStore([
+      { word: "朋友", commonness: 10, vector: [1, 0, 0] },
+      { word: "人工智能", commonness: 9, vector: [0.9, 0.1, 0] },
+      { word: "幸福快乐每一天", commonness: 8, vector: [0, 1, 0] },
+    ]);
+
+    expect(store.has("朋友")).toBe(true);
+    expect(store.has("人工智能")).toBe(true);
+    expect(store.has("幸福快乐每一天")).toBe(false);
+    expect(store.all()).toHaveLength(2);
+  });
+
+  it("maps rank to a linear percentile", () => {
+    expect(rankToPercentile(1, 100)).toBe(100);
+    expect(rankToPercentile(100, 100)).toBeCloseTo(0);
+    expect(rankToPercentile(2, 4)).toBeCloseTo(66.67, 1);
+  });
+
+  it("maps cosine to a monotonic power-curve proximity score", () => {
+    const minCos = 0.1;
+    const maxCos = 0.9;
+
+    expect(computeProximity(1, minCos, maxCos, true)).toBe(100);
+    expect(computeProximity(0.9, minCos, maxCos)).toBeGreaterThan(computeProximity(0.5, minCos, maxCos));
+    expect(computeProximity(0.5, minCos, maxCos)).toBeGreaterThan(computeProximity(0.1, minCos, maxCos));
+    expect(computeProximity(0.1, minCos, maxCos)).toBe(0);
+    expect(computeProximity(0.9, minCos, maxCos)).toBeLessThan(100);
   });
 });
 
