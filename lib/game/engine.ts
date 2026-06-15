@@ -93,6 +93,15 @@ export class GameEngine {
     };
   }
 
+  validateGuessWord(rawWord: string) {
+    const word = normalizeWord(rawWord);
+    if (!this.store.has(word)) {
+      throw new Error("请输入词库中的词。");
+    }
+
+    return word;
+  }
+
   createSharedSession(targetWord = this.store.randomTarget().word) {
     return {
       gameId: randomUUID(),

@@ -11,6 +11,8 @@ type LobbyRoom = {
   roomCode: string;
   session: ReturnType<GameEngine["createSharedSession"]>;
   players: Map<string, Player>;
+  hostId: string;
+  customTarget: boolean;
   createdAt: number;
   emptyRoomCleanup?: NodeJS.Timeout;
 };
@@ -43,6 +45,7 @@ function publicRoom(room: LobbyRoom) {
     bestGuess: bestGuess(room.session.guesses),
     solved: room.session.solved,
     attempts: room.session.guesses.length,
+    customTarget: room.customTarget,
   };
 }
 
@@ -67,19 +70,36 @@ export function registerLobbyHandlers(io: Server) {
   }
 
   io.on("connection", (socket) => {
-    socket.on("room:create", (payload: { playerName?: string }, ack: ClientAck<ReturnType<typeof publicRoom>>) => {
-      const roomCode = createRoomCode(new Set(rooms.keys()));
-      const room: LobbyRoom = {
-        roomCode,
-        session: gameEngine.createSharedSession(),
-        players: new Map(),
-        createdAt: Date.now(),
-      };
-      rooms.set(roomCode, room);
-      joinSocketToRoom(socket, room, payload.playerName);
-      ack({ ok: true, data: publicRoom(room) });
-      io.to(roomCode).emit("room:update", publicRoom(room));
-    });
+    socket.on(
+      "room:create",
+      (payload: { playerName?: string; targetWord?: string }, ack: ClientAck<ReturnType<typeof publicRoom>>) => {
+        let targetWord: string | undefined;
+        const customTarget = Boolean(payload.targetWord?.trim());
+
+        if (customTarget) {
+          try {
+            targetWord = gameEngine.validateGuessWord(payload.targetWord ?? "");
+          } catch (error) {
+            ack({ ok: false, error: error instanceof Error ? error.message : "目标词无效。" });
+            return;
+          }
+        }
+
+        const roomCode = createRoomCode(new Set(rooms.keys()));
+        const room: LobbyRoom = {
+          roomCode,
+          session: gameEngine.createSharedSession(targetWord),
+          players: new Map(),
+          hostId: socket.id,
+          customTarget,
+          createdAt: Date.now(),
+        };
+        rooms.set(roomCode, room);
+        joinSocketToRoom(socket, room, payload.playerName);
+        ack({ ok: true, data: publicRoom(room) });
+        io.to(roomCode).emit("room:update", publicRoom(room));
+      },
+    );
 
     socket.on("room:join", (payload: { roomCode?: string; playerName?: string }, ack: ClientAck<ReturnType<typeof publicRoom>>) => {
       const roomCode = payload.roomCode?.trim().toUpperCase();
