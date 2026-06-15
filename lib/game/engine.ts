@@ -111,6 +111,15 @@ export class GameEngine {
     } satisfies GameSession;
   }
 
+  resetSharedSession(session: GameSession) {
+    const fresh = this.createSharedSession();
+    session.gameId = fresh.gameId;
+    session.targetWord = fresh.targetWord;
+    session.guesses = [];
+    session.solved = false;
+    return session;
+  }
+
   getGame(gameId: string) {
     const session = this.sessions.get(gameId);
     return session ? toPublicGameState(session) : undefined;

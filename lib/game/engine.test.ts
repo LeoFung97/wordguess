@@ -109,6 +109,18 @@ describe("game engine", () => {
     expect(engine.submitGuess(game.gameId, "城市").guess.isCorrect).toBe(true);
   });
 
+  it("resets a shared session with a new random target", () => {
+    const engine = new GameEngine(testStore);
+    const session = engine.createSharedSession("朋友");
+    engine.submitGuessToSession(session, "同学");
+
+    engine.resetSharedSession(session);
+
+    expect(session.guesses).toHaveLength(0);
+    expect(session.solved).toBe(false);
+    expect(session.gameId).not.toBe("");
+  });
+
   it("reveals a non-answer hint as a system guess", () => {
     const engine = new GameEngine(testStore);
     const session = engine.createSharedSession("朋友");
