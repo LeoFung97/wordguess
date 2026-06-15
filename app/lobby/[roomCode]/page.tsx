@@ -48,6 +48,7 @@ export default function LobbyPage() {
   const [error, setError] = useState("");
   const [isJoining, setIsJoining] = useState(false);
   const [isHinting, setIsHinting] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
   const socketRef = useRef<Socket | null>(null);
   const roomRef = useRef<PublicRoom | undefined>(undefined);
   const playerNameRef = useRef(playerName);
@@ -163,6 +164,21 @@ export default function LobbyPage() {
     });
   }
 
+  async function resetRandomTarget() {
+    if (!room || room.customTarget || isResetting) {
+      return;
+    }
+
+    setError("");
+    setIsResetting(true);
+    getSocket().emit("room:reset", { roomCode: room.roomCode }, (result: Ack<PublicRoom>) => {
+      setIsResetting(false);
+      if (!result.ok) {
+        setError(result.error);
+      }
+    });
+  }
+
   async function revealHint() {
     if (!room || room.solved || isHinting) {
       return;
@@ -266,6 +282,15 @@ export default function LobbyPage() {
           字距
         </Link>
         <div className="flex gap-2">
+          {!room.customTarget ? (
+            <button
+              onClick={() => void resetRandomTarget()}
+              disabled={isResetting}
+              className="rounded-full border border-white/10 bg-white/[0.06] px-4 py-2 text-sm text-white/70 transition hover:bg-white/[0.1] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isResetting ? "换词中" : "换新词"}
+            </button>
+          ) : null}
           <button
             onClick={() => void revealHint()}
             disabled={room.solved || isHinting}

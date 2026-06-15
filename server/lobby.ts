@@ -136,6 +136,25 @@ export function registerLobbyHandlers(io: Server) {
       },
     );
 
+    socket.on("room:reset", (payload: { roomCode?: string }, ack: ClientAck<ReturnType<typeof publicRoom>>) => {
+      const roomCode = payload.roomCode?.trim().toUpperCase() || socket.data.roomCode;
+      const room = roomCode ? rooms.get(roomCode) : undefined;
+
+      if (!room) {
+        ack({ ok: false, error: "找不到这个房间。" });
+        return;
+      }
+
+      if (room.customTarget) {
+        ack({ ok: false, error: "自定义目标词的房间不能换词。" });
+        return;
+      }
+
+      gameEngine.resetSharedSession(room.session);
+      ack({ ok: true, data: publicRoom(room) });
+      io.to(room.roomCode).emit("room:update", publicRoom(room));
+    });
+
     socket.on("hint:request", (payload: { roomCode?: string }, ack: ClientAck<{ guess: GuessResult }>) => {
       const roomCode = payload.roomCode?.trim().toUpperCase() || socket.data.roomCode;
       const room = roomCode ? rooms.get(roomCode) : undefined;
