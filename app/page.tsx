@@ -13,7 +13,7 @@ export default function HomePage() {
       <section className="grid flex-1 items-center gap-10 py-16 lg:grid-cols-[1.05fr_0.95fr]">
         <div>
           <p className="mb-5 inline-flex rounded-full border border-teal-200/20 bg-teal-200/10 px-4 py-2 text-sm text-teal-100">
-            基于中文 Word2Vec 的语义猜词
+            基于腾讯 AI Lab 中文词向量的语义猜词
           </p>
           <h1 className="text-5xl font-black leading-tight tracking-tight text-white sm:text-7xl">
             猜的不是字面，
@@ -22,7 +22,7 @@ export default function HomePage() {
             </span>
           </h1>
           <p className="mt-6 max-w-2xl text-lg leading-8 text-white/65">
-            输入两个汉字的常用词，系统会用词向量计算它和目标词的语义相似度。
+            输入词库中的任意词，系统会用词向量计算它和目标词的语义相似度。
             越接近，温度越高。一个人挑战，或开房间和朋友一起猜。
           </p>
 
@@ -46,7 +46,7 @@ export default function HomePage() {
           <div className="rounded-[1.5rem] bg-slate-950/50 p-5">
             <div className="mb-5 flex items-center justify-between">
               <span className="text-sm text-white/50">今日目标</span>
-              <span className="rounded-full bg-emerald-300/15 px-3 py-1 text-xs text-emerald-100">2 字词库</span>
+              <span className="rounded-full bg-emerald-300/15 px-3 py-1 text-xs text-emerald-100">腾讯词库</span>
             </div>
             {[
               ["朋友", "61.42", "接近"],

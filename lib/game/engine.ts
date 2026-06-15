@@ -9,24 +9,24 @@ type GameSession = {
   solved: boolean;
 };
 
-function rankToTemperature(rank: number, isCorrect: boolean): GuessTemperature {
+function proximityToTemperature(proximity: number, isCorrect: boolean): GuessTemperature {
   if (isCorrect) {
     return "solved";
   }
 
-  if (rank <= 10) {
+  if (proximity >= 95) {
     return "burning";
   }
 
-  if (rank <= 100) {
+  if (proximity >= 80) {
     return "hot";
   }
 
-  if (rank <= 1000) {
+  if (proximity >= 55) {
     return "warm";
   }
 
-  if (rank <= 5000) {
+  if (proximity >= 25) {
     return "cold";
   }
 
@@ -40,7 +40,7 @@ export function formatSimilarity(rawSimilarity: number) {
 export function bestGuess(guesses: GuessResult[]) {
   return guesses
     .filter((guess) => !guess.isCorrect)
-    .toSorted((first, second) => first.rank - second.rank)[0];
+    .toSorted((first, second) => second.proximity - first.proximity || first.rank - second.rank)[0];
 }
 
 export function toPublicGameState(session: GameSession): PublicGameState {
@@ -62,9 +62,10 @@ function toGuessResult(session: GameSession, ranked: RankedWord, playerName?: st
     playerName,
     attempt: session.guesses.length + 1,
     similarity,
+    percentile: ranked.percentile,
     proximity: ranked.proximity,
     rank: ranked.rank,
-    temperature: rankToTemperature(ranked.rank, isCorrect),
+    temperature: proximityToTemperature(ranked.proximity, isCorrect),
     isCorrect,
     createdAt: Date.now(),
   };
@@ -131,7 +132,7 @@ export class GameEngine {
 
     const word = normalizeWord(rawWord);
     if (!this.store.has(word)) {
-      throw new Error("请输入词库中的两个汉字常用词。");
+      throw new Error("请输入词库中的词。");
     }
 
     if (session.guesses.some((guess) => guess.word === word)) {

@@ -16,6 +16,7 @@ export type GuessResult = {
   word: string;
   attempt: number;
   similarity: number;
+  percentile: number;
   proximity: number;
   rank: number;
   temperature: GuessTemperature;

@@ -3,9 +3,9 @@ import path from "path";
 import targetWords from "../../data/target-words.json";
 import type { WordVectorEntry } from "./types";
 
-const TWO_CHARACTER_CHINESE = /^[\u4e00-\u9fff]{2}$/u;
 const vectorDataPath = path.join(process.cwd(), "data", "vectors.f32");
 const wordDataPath = path.join(process.cwd(), "data", "words.json");
+const MAX_WORD_LENGTH = 4;
 
 type StoredWordEntry = {
   word: string;
@@ -15,6 +15,7 @@ type StoredWordEntry = {
 export type RankedWord = {
   word: string;
   similarity: number;
+  percentile: number;
   proximity: number;
   rank: number;
 };
@@ -38,12 +39,13 @@ export function normalizeVector(vector: ArrayLike<number>) {
   return Array.from({ length: vector.length }, (_, index) => vector[index] / length);
 }
 
-export function isTwoCharacterChineseWord(word: string) {
-  return TWO_CHARACTER_CHINESE.test(word.trim());
-}
-
 export function normalizeWord(word: string) {
   return word.trim().replace(/\s+/g, "");
+}
+
+export function isAllowedGuessWord(word: string) {
+  const normalized = normalizeWord(word);
+  return normalized.length >= 1 && normalized.length <= MAX_WORD_LENGTH;
 }
 
 export function cosineSimilarity(first: ArrayLike<number>, second: ArrayLike<number>) {
@@ -89,7 +91,7 @@ function loadStoredEntries(): WordVectorEntry[] {
   }));
 }
 
-function rankToProximity(rank: number, totalWords: number) {
+export function rankToPercentile(rank: number, totalWords: number) {
   if (rank <= 1) {
     return 100;
   }
@@ -98,8 +100,38 @@ function rankToProximity(rank: number, totalWords: number) {
     return 0;
   }
 
-  const score = 100 * (1 - Math.log(rank) / Math.log(totalWords));
-  return Math.min(99.99, Math.max(0, Math.round(score * 100) / 100));
+  return (100 * (totalWords - rank)) / (totalWords - 1);
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+export function computeProximity(
+  rawSimilarity: number,
+  minCos: number,
+  maxCos: number,
+  isExactAnswer = false,
+) {
+  if (isExactAnswer) {
+    return 100;
+  }
+
+  const span = maxCos - minCos;
+  const u = span > 0 ? clamp((rawSimilarity - minCos) / span, 0, 1) : 0;
+  const score = clamp(99.99 * u ** 0.35, 0, 99.99);
+
+  return Math.round(score * 100) / 100;
+}
+
+function targetCalibration(cosines: number[]) {
+  const sortedAsc = cosines.toSorted((first, second) => first - second);
+  const sortedDesc = cosines.toSorted((first, second) => second - first);
+
+  return {
+    minCos: sortedAsc[Math.floor(0.1 * (sortedAsc.length - 1))] ?? sortedAsc[0] ?? 0,
+    maxCos: sortedDesc[1] ?? sortedDesc[0] ?? 0,
+  };
 }
 
 export class VectorStore {
@@ -109,7 +141,7 @@ export class VectorStore {
 
   constructor(entries: WordVectorEntry[], targetWordList?: string[], options: { vectorsAreNormalized?: boolean } = {}) {
     this.entries = entries
-      .filter((entry) => isTwoCharacterChineseWord(entry.word))
+      .filter((entry) => isAllowedGuessWord(entry.word))
       .map((entry) => ({
         ...entry,
         word: normalizeWord(entry.word),
@@ -150,28 +182,55 @@ export class VectorStore {
       return undefined;
     }
 
+    const cosines = this.entries.map((entry) => cosineSimilarity(target.vector, entry.vector));
+    const { minCos, maxCos } = targetCalibration(cosines);
+
     const ranked = this.entries
-      .map((entry) => ({
+      .map((entry, index) => ({
         word: entry.word,
-        similarity: cosineSimilarity(target.vector, entry.vector),
+        similarity: cosines[index],
       }))
       .sort((first, second) => second.similarity - first.similarity);
 
-    return ranked.map((entry, index) => ({
-      ...entry,
-      rank: index + 1,
-      proximity: rankToProximity(index + 1, ranked.length),
-    }));
+    return ranked.map((entry, index) => {
+      const rank = index + 1;
+
+      return {
+        ...entry,
+        rank,
+        percentile: rankToPercentile(rank, ranked.length),
+        proximity: computeProximity(entry.similarity, minCos, maxCos, entry.word === targetWord),
+      };
+    });
   }
 
   rankAgainstTarget(targetWord: string, guessWord: string) {
+    const target = this.get(targetWord);
     const guess = this.get(guessWord);
-    const ranked = this.rankedWordsAgainstTarget(targetWord);
-    if (!guess || !ranked) {
+    if (!target || !guess) {
       return undefined;
     }
 
-    return ranked.find((entry) => entry.word === guess.word);
+    const cosines = this.entries.map((entry) => cosineSimilarity(target.vector, entry.vector));
+    const { minCos, maxCos } = targetCalibration(cosines);
+    const guessSimilarity = cosineSimilarity(target.vector, guess.vector);
+    let rank = 1;
+
+    for (const entry of this.entries) {
+      if (cosineSimilarity(target.vector, entry.vector) > guessSimilarity) {
+        rank += 1;
+      }
+    }
+
+    const totalWords = this.entries.length;
+
+    return {
+      word: guess.word,
+      similarity: guessSimilarity,
+      rank,
+      percentile: rankToPercentile(rank, totalWords),
+      proximity: computeProximity(guessSimilarity, minCos, maxCos, guess.word === targetWord),
+    };
   }
 }
 
