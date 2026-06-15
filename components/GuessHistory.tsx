@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { GuessResult } from "@/lib/game/types";
-import { formatTopPercentLabel } from "@/lib/game/vector-store";
+import { formatTopPercentLabel } from "@/lib/game/scoring";
 import { temperatureClass, temperatureCopy } from "./temperature";
 
 type GuessHistoryProps = {

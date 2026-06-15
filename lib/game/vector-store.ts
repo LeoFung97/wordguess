@@ -1,6 +1,7 @@
 import { readFileSync } from "fs";
 import path from "path";
 import targetWords from "../../data/target-words.json";
+import { computeHeatScore, rankToPercentile } from "./scoring";
 import type { WordVectorEntry } from "./types";
 
 const vectorDataPath = path.join(process.cwd(), "data", "vectors.f32");
@@ -91,47 +92,6 @@ function loadStoredEntries(): WordVectorEntry[] {
   }));
 }
 
-export function rankToPercentile(rank: number, totalWords: number) {
-  if (totalWords <= 0) {
-    return 0;
-  }
-
-  return (rank / totalWords) * 100;
-}
-
-export function formatTopPercentLabel(topPercent: number) {
-  if (topPercent < 0.01) {
-    return `前 ${topPercent.toFixed(3)}%`;
-  }
-
-  if (topPercent < 1) {
-    return `前 ${topPercent.toFixed(2)}%`;
-  }
-
-  return `前 ${topPercent.toFixed(1)}%`;
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
-}
-
-export function computeProximity(
-  rawSimilarity: number,
-  minCos: number,
-  maxCos: number,
-  isExactAnswer = false,
-) {
-  if (isExactAnswer) {
-    return 100;
-  }
-
-  const span = maxCos - minCos;
-  const u = span > 0 ? clamp((rawSimilarity - minCos) / span, 0, 1) : 0;
-  const score = clamp(99.99 * u ** 0.5, 0, 99.99);
-
-  return Math.round(score * 100) / 100;
-}
-
 function targetCalibration(cosines: number[]) {
   const sortedAsc = cosines.toSorted((first, second) => first - second);
   const sortedDesc = cosines.toSorted((first, second) => second - first);
@@ -207,7 +167,7 @@ export class VectorStore {
         ...entry,
         rank,
         percentile: rankToPercentile(rank, ranked.length),
-        proximity: computeProximity(entry.similarity, minCos, maxCos, entry.word === targetWord),
+        proximity: computeHeatScore(entry.similarity, minCos, maxCos, entry.word === targetWord),
       };
     });
   }
@@ -237,7 +197,7 @@ export class VectorStore {
       similarity: guessSimilarity,
       rank,
       percentile: rankToPercentile(rank, totalWords),
-      proximity: computeProximity(guessSimilarity, minCos, maxCos, guess.word === targetWord),
+      proximity: computeHeatScore(guessSimilarity, minCos, maxCos, guess.word === targetWord),
     };
   }
 }
