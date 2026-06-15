@@ -22,6 +22,16 @@ export function formatTopPercentLabel(topPercent: number) {
   return `前 ${topPercent.toFixed(1)}%`;
 }
 
+/** Maps raw hybrid semantic closeness (0..1) to player-facing heat. */
+export function computeHybridDisplayScore(rawHybrid: number, isAnswer = false) {
+  if (isAnswer) {
+    return 100;
+  }
+
+  const u = clamp(rawHybrid, 0, 1);
+  return Math.round(Math.min(99.99, 99.99 * u ** 0.45) * 100) / 100;
+}
+
 export function computeHeatScore(
   cos: number,
   minCos: number,
