@@ -87,6 +87,8 @@ describe("game engine", () => {
     const session = engine.createSharedSession("朋友");
 
     expect(() => engine.submitGuessToSession(session, "不存在")).toThrow("词库");
+    expect(() => engine.validateGuessWord("不存在")).toThrow("词库");
+    expect(engine.validateGuessWord("朋友")).toBe("朋友");
   });
 
   it("chooses targets from a curated answer list while accepting all guess words", () => {

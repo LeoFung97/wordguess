@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Converter } from "opencc-js/t2cn";
 import { io, type Socket } from "socket.io-client";
 import { GuessForm } from "@/components/GuessForm";
 import { GuessHistory } from "@/components/GuessHistory";
@@ -21,9 +22,15 @@ type PublicRoom = {
   bestGuess?: GuessResult;
   solved: boolean;
   attempts: number;
+  customTarget: boolean;
 };
 
 type Ack<T> = { ok: true; data: T } | { ok: false; error: string };
+
+type TargetMode = "random" | "custom";
+
+const toSimplifiedChinese = Converter({ from: "tw", to: "cn" });
+const MAX_WORD_LENGTH = 4;
 
 export default function LobbyPage() {
   const params = useParams<{ roomCode: string }>();
@@ -35,6 +42,8 @@ export default function LobbyPage() {
 
     return localStorage.getItem("playerName") ?? "";
   });
+  const [targetMode, setTargetMode] = useState<TargetMode>("random");
+  const [targetWord, setTargetWord] = useState("");
   const [room, setRoom] = useState<PublicRoom>();
   const [error, setError] = useState("");
   const [isJoining, setIsJoining] = useState(false);
@@ -99,12 +108,27 @@ export default function LobbyPage() {
     setIsJoining(true);
     localStorage.setItem("playerName", playerName.trim() || "匿名玩家");
 
+    const normalizedTargetWord = toSimplifiedChinese(targetWord.trim().replace(/\s+/g, ""));
+    if (requestedRoomCode === "NEW" && targetMode === "custom") {
+      if (normalizedTargetWord.length < 1 || normalizedTargetWord.length > MAX_WORD_LENGTH) {
+        setError(`自定义目标词需要 1 到 ${MAX_WORD_LENGTH} 个字。`);
+        setIsJoining(false);
+        return;
+      }
+    }
+
     const socket = getSocket();
     const eventName = requestedRoomCode === "NEW" ? "room:create" : "room:join";
-    const payload = {
-      roomCode: requestedRoomCode,
-      playerName,
-    };
+    const payload =
+      requestedRoomCode === "NEW"
+        ? {
+            playerName,
+            ...(targetMode === "custom" ? { targetWord: normalizedTargetWord } : {}),
+          }
+        : {
+            roomCode: requestedRoomCode,
+            playerName,
+          };
 
     socket.emit(eventName, payload, (result: Ack<PublicRoom>) => {
       setIsJoining(false);
@@ -173,8 +197,47 @@ export default function LobbyPage() {
             {requestedRoomCode === "NEW" ? "创建一起猜的房间" : `加入房间 ${requestedRoomCode}`}
           </h1>
           <p className="mt-4 leading-7 text-white/60">
-            输入昵称后进入大厅。所有玩家会看到同一个目标词和实时猜词记录。
+            输入昵称后进入大厅。和朋友一起猜同一个目标词，所有猜测都会实时同步。
           </p>
+          {requestedRoomCode === "NEW" ? (
+            <div className="mt-6 space-y-4">
+              <p className="text-sm text-white/50">目标词模式</p>
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={() => setTargetMode("random")}
+                  className={`rounded-2xl border px-5 py-4 text-left transition ${
+                    targetMode === "random"
+                      ? "border-teal-200/70 bg-teal-200/10 text-white"
+                      : "border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/[0.08]"
+                  }`}
+                >
+                  <span className="block font-semibold">随机目标词</span>
+                  <span className="mt-1 block text-sm text-white/50">系统从词库中随机挑选</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTargetMode("custom")}
+                  className={`rounded-2xl border px-5 py-4 text-left transition ${
+                    targetMode === "custom"
+                      ? "border-teal-200/70 bg-teal-200/10 text-white"
+                      : "border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/[0.08]"
+                  }`}
+                >
+                  <span className="block font-semibold">自定义目标词</span>
+                  <span className="mt-1 block text-sm text-white/50">房主指定词库中的 1 到 4 个字</span>
+                </button>
+              </div>
+              {targetMode === "custom" ? (
+                <input
+                  value={targetWord}
+                  onChange={(event) => setTargetWord(event.target.value)}
+                  placeholder="输入目标词，需在词库中"
+                  className="min-h-14 w-full rounded-2xl border border-white/10 bg-white/10 px-5 text-white outline-none placeholder:text-white/35 focus:border-teal-200/70"
+                />
+              ) : null}
+            </div>
+          ) : null}
           <div className="mt-7 flex flex-col gap-3 sm:flex-row">
             <input
               value={playerName}
@@ -226,6 +289,7 @@ export default function LobbyPage() {
             <h1 className="mt-3 text-4xl font-black text-white">房间 {room.roomCode}</h1>
             <p className="mt-4 leading-7 text-white/60">
               和朋友一起猜同一个目标词。每个人的猜测都会实时同步。
+              {room.customTarget ? " 本房间由房主指定了目标词。" : " 本房间使用随机目标词。"}
             </p>
           </div>
 
