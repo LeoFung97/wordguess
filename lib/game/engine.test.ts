@@ -1,12 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { GameEngine, formatSimilarity } from "./engine";
 import {
-  computeProximity,
-  cosineSimilarity,
-  normalizeVector,
+  computeHeatScore,
+  formatTopPercentLabel,
   rankToPercentile,
-  VectorStore,
-} from "./vector-store";
+} from "./scoring";
+import { cosineSimilarity, normalizeVector, VectorStore } from "./vector-store";
 
 const testStore = new VectorStore([
   { word: "朋友", commonness: 10, vector: [1, 0, 0] },
@@ -37,21 +36,28 @@ describe("vector helpers", () => {
     expect(store.all()).toHaveLength(2);
   });
 
-  it("maps rank to a linear percentile", () => {
-    expect(rankToPercentile(1, 100)).toBe(100);
-    expect(rankToPercentile(100, 100)).toBeCloseTo(0);
-    expect(rankToPercentile(2, 4)).toBeCloseTo(66.67, 1);
+  it("maps rank to a top-percentile position", () => {
+    expect(rankToPercentile(1, 10_000)).toBeCloseTo(0.01);
+    expect(rankToPercentile(100, 10_000)).toBeCloseTo(1);
+    expect(rankToPercentile(10_000, 10_000)).toBeCloseTo(100);
   });
 
-  it("maps cosine to a monotonic power-curve proximity score", () => {
+  it("formats top percent with adaptive precision", () => {
+    expect(formatTopPercentLabel(0.0014)).toBe("前 0.001%");
+    expect(formatTopPercentLabel(0.12)).toBe("前 0.12%");
+    expect(formatTopPercentLabel(12.3)).toBe("前 12.3%");
+  });
+
+  it("maps cosine to a piecewise heat score", () => {
     const minCos = 0.1;
     const maxCos = 0.9;
 
-    expect(computeProximity(1, minCos, maxCos, true)).toBe(100);
-    expect(computeProximity(0.9, minCos, maxCos)).toBeGreaterThan(computeProximity(0.5, minCos, maxCos));
-    expect(computeProximity(0.5, minCos, maxCos)).toBeGreaterThan(computeProximity(0.1, minCos, maxCos));
-    expect(computeProximity(0.1, minCos, maxCos)).toBe(0);
-    expect(computeProximity(0.9, minCos, maxCos)).toBeLessThan(100);
+    expect(computeHeatScore(1, minCos, maxCos, true)).toBe(100);
+    expect(computeHeatScore(0.9, minCos, maxCos)).toBe(99.9);
+    expect(computeHeatScore(0.9, minCos, maxCos)).toBeGreaterThan(computeHeatScore(0.5, minCos, maxCos));
+    expect(computeHeatScore(0.5, minCos, maxCos)).toBeGreaterThan(computeHeatScore(0.1, minCos, maxCos));
+    expect(computeHeatScore(0.1, minCos, maxCos)).toBe(0);
+    expect(computeHeatScore(0.5, 0.5, 0.5)).toBe(50);
   });
 });
 
