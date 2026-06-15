@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { JoinLobbyForm } from "@/components/JoinLobbyForm";
 
 export default function HomePage() {
   return (
@@ -39,6 +40,11 @@ export default function HomePage() {
             >
               创建大厅
             </Link>
+          </div>
+
+          <div className="mt-6 max-w-md">
+            <p className="mb-3 text-sm text-white/50">已有房间码？</p>
+            <JoinLobbyForm />
           </div>
         </div>
 

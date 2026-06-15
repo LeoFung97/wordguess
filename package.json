@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@next/eslint-plugin-next": "latest",
-    "@tailwindcss/postcss": "latest",
+    "@tailwindcss/postcss": "^4.3.1",
     "clsx": "latest",
     "next": "latest",
     "opencc-js": "^1.3.1",
@@ -29,7 +29,7 @@
     "@types/react-dom": "latest",
     "eslint": "latest",
     "eslint-config-next": "latest",
-    "tailwindcss": "latest",
+    "tailwindcss": "^4.3.1",
     "tsx": "latest",
     "typescript": "latest",
     "vitest": "latest"
