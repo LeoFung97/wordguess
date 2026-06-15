@@ -1,7 +1,9 @@
 import { readFileSync } from "fs";
 import path from "path";
 import targetWords from "../../data/target-words.json";
-import { computeHeatScore, rankToPercentile } from "./scoring";
+import { computeHybridRawScore } from "./hybrid-scorer";
+import { computeHybridDisplayScore, rankToPercentile } from "./scoring";
+import { semanticKnowledgeStore, type SemanticKnowledgeStore } from "./semantic-knowledge";
 import type { WordVectorEntry } from "./types";
 
 const vectorDataPath = path.join(process.cwd(), "data", "vectors.f32");
@@ -92,22 +94,17 @@ function loadStoredEntries(): WordVectorEntry[] {
   }));
 }
 
-function targetCalibration(cosines: number[]) {
-  const sortedAsc = cosines.toSorted((first, second) => first - second);
-  const sortedDesc = cosines.toSorted((first, second) => second - first);
-
-  return {
-    minCos: sortedAsc[Math.floor(0.1 * (sortedAsc.length - 1))] ?? sortedAsc[0] ?? 0,
-    maxCos: sortedDesc[1] ?? sortedDesc[0] ?? 0,
-  };
-}
-
 export class VectorStore {
   private readonly entries: WordVectorEntry[];
   private readonly byWord: Map<string, WordVectorEntry>;
   private readonly targetEntries: WordVectorEntry[];
+  private readonly knowledge: SemanticKnowledgeStore;
 
-  constructor(entries: WordVectorEntry[], targetWordList?: string[], options: { vectorsAreNormalized?: boolean } = {}) {
+  constructor(
+    entries: WordVectorEntry[],
+    targetWordList?: string[],
+    options: { vectorsAreNormalized?: boolean; knowledge?: SemanticKnowledgeStore } = {},
+  ) {
     this.entries = entries
       .filter((entry) => isAllowedGuessWord(entry.word))
       .map((entry) => ({
@@ -117,6 +114,7 @@ export class VectorStore {
       }))
       .sort((first, second) => second.commonness - first.commonness);
     this.byWord = new Map(this.entries.map((entry) => [entry.word, entry]));
+    this.knowledge = options.knowledge ?? semanticKnowledgeStore;
 
     this.targetEntries =
       targetWordList
@@ -144,30 +142,36 @@ export class VectorStore {
     return targetPool[Math.floor(Math.random() * targetPool.length)];
   }
 
+  private scoreEntryAgainstTarget(targetWord: string, targetVector: ArrayLike<number>, entry: WordVectorEntry) {
+    const cosine = cosineSimilarity(targetVector, entry.vector);
+    const rawHybrid = computeHybridRawScore(targetWord, entry.word, cosine, this.knowledge);
+
+    return {
+      word: entry.word,
+      similarity: cosine,
+      rawHybrid,
+    };
+  }
+
   rankedWordsAgainstTarget(targetWord: string): RankedWord[] | undefined {
     const target = this.get(targetWord);
     if (!target) {
       return undefined;
     }
 
-    const cosines = this.entries.map((entry) => cosineSimilarity(target.vector, entry.vector));
-    const { minCos, maxCos } = targetCalibration(cosines);
-
     const ranked = this.entries
-      .map((entry, index) => ({
-        word: entry.word,
-        similarity: cosines[index],
-      }))
-      .sort((first, second) => second.similarity - first.similarity);
+      .map((entry) => this.scoreEntryAgainstTarget(target.word, target.vector, entry))
+      .sort((first, second) => second.rawHybrid - first.rawHybrid || second.similarity - first.similarity);
 
     return ranked.map((entry, index) => {
       const rank = index + 1;
 
       return {
-        ...entry,
+        word: entry.word,
+        similarity: entry.similarity,
         rank,
         percentile: rankToPercentile(rank, ranked.length),
-        proximity: computeHeatScore(entry.similarity, minCos, maxCos, entry.word === targetWord),
+        proximity: computeHybridDisplayScore(entry.rawHybrid, entry.word === targetWord),
       };
     });
   }
@@ -179,13 +183,12 @@ export class VectorStore {
       return undefined;
     }
 
-    const cosines = this.entries.map((entry) => cosineSimilarity(target.vector, entry.vector));
-    const { minCos, maxCos } = targetCalibration(cosines);
-    const guessSimilarity = cosineSimilarity(target.vector, guess.vector);
+    const scored = this.entries.map((entry) => this.scoreEntryAgainstTarget(target.word, target.vector, entry));
+    const guessScore = this.scoreEntryAgainstTarget(target.word, target.vector, guess);
     let rank = 1;
 
-    for (const entry of this.entries) {
-      if (cosineSimilarity(target.vector, entry.vector) > guessSimilarity) {
+    for (const entry of scored) {
+      if (entry.rawHybrid > guessScore.rawHybrid) {
         rank += 1;
       }
     }
@@ -194,10 +197,10 @@ export class VectorStore {
 
     return {
       word: guess.word,
-      similarity: guessSimilarity,
+      similarity: guessScore.similarity,
       rank,
       percentile: rankToPercentile(rank, totalWords),
-      proximity: computeHeatScore(guessSimilarity, minCos, maxCos, guess.word === targetWord),
+      proximity: computeHybridDisplayScore(guessScore.rawHybrid, guess.word === targetWord),
     };
   }
 }

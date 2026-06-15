@@ -1,0 +1,4 @@
+# Offline semantic knowledge prep (scripts/prepare-semantic-knowledge.py)
+OpenHowNet>=2.0
+networkx>=3.0
+gensim>=4.0
