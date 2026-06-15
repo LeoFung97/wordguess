@@ -3,6 +3,7 @@ import { GameEngine, formatSimilarity } from "./engine";
 import {
   computeProximity,
   cosineSimilarity,
+  formatTopPercentLabel,
   normalizeVector,
   rankToPercentile,
   VectorStore,
@@ -37,10 +38,16 @@ describe("vector helpers", () => {
     expect(store.all()).toHaveLength(2);
   });
 
-  it("maps rank to a linear percentile", () => {
-    expect(rankToPercentile(1, 100)).toBe(100);
-    expect(rankToPercentile(100, 100)).toBeCloseTo(0);
-    expect(rankToPercentile(2, 4)).toBeCloseTo(66.67, 1);
+  it("maps rank to a top-percentile position", () => {
+    expect(rankToPercentile(1, 10_000)).toBeCloseTo(0.01);
+    expect(rankToPercentile(100, 10_000)).toBeCloseTo(1);
+    expect(rankToPercentile(10_000, 10_000)).toBeCloseTo(100);
+  });
+
+  it("formats top percent with adaptive precision", () => {
+    expect(formatTopPercentLabel(0.0014)).toBe("前 0.001%");
+    expect(formatTopPercentLabel(0.12)).toBe("前 0.12%");
+    expect(formatTopPercentLabel(12.3)).toBe("前 12.3%");
   });
 
   it("maps cosine to a monotonic power-curve proximity score", () => {

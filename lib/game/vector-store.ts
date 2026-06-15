@@ -92,15 +92,23 @@ function loadStoredEntries(): WordVectorEntry[] {
 }
 
 export function rankToPercentile(rank: number, totalWords: number) {
-  if (rank <= 1) {
-    return 100;
-  }
-
-  if (totalWords <= 1) {
+  if (totalWords <= 0) {
     return 0;
   }
 
-  return (100 * (totalWords - rank)) / (totalWords - 1);
+  return (rank / totalWords) * 100;
+}
+
+export function formatTopPercentLabel(topPercent: number) {
+  if (topPercent < 0.01) {
+    return `前 ${topPercent.toFixed(3)}%`;
+  }
+
+  if (topPercent < 1) {
+    return `前 ${topPercent.toFixed(2)}%`;
+  }
+
+  return `前 ${topPercent.toFixed(1)}%`;
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -119,7 +127,7 @@ export function computeProximity(
 
   const span = maxCos - minCos;
   const u = span > 0 ? clamp((rawSimilarity - minCos) / span, 0, 1) : 0;
-  const score = clamp(99.99 * u ** 0.35, 0, 99.99);
+  const score = clamp(99.99 * u ** 0.5, 0, 99.99);
 
   return Math.round(score * 100) / 100;
 }
