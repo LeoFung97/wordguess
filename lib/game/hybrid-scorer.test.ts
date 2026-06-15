@@ -124,7 +124,7 @@ describe("hybrid semantic scoring", () => {
     expect(missing.sememeScore).toBe(0);
     expect(missing.synonymScore).toBe(0);
     expect(missing.graphScore).toBe(0);
-    expect(missing.rawHybrid).toBeCloseTo(0.65 * 0.5);
+    expect(missing.rawHybrid).toBeCloseTo(0.62 * 0.5);
   });
 
   it("ranks guesses by hybrid score in VectorStore", () => {

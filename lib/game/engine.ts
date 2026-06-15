@@ -78,6 +78,7 @@ export class GameEngine {
 
   createGame(): CreateGameResult {
     const target = this.store.randomTarget();
+    this.store.warmTarget(target.word);
     const session: GameSession = {
       gameId: randomUUID(),
       targetWord: target.word,
@@ -103,6 +104,7 @@ export class GameEngine {
   }
 
   createSharedSession(targetWord = this.store.randomTarget().word) {
+    this.store.warmTarget(targetWord);
     return {
       gameId: randomUUID(),
       targetWord,

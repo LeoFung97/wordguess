@@ -1,7 +1,7 @@
 import { readFileSync } from "fs";
 import path from "path";
 import targetWords from "../../data/target-words.json";
-import { computeHybridRawScore } from "./hybrid-scorer";
+import { computeHybridFeaturesWithContext } from "./hybrid-scorer";
 import { computeHybridDisplayScore, rankToPercentile } from "./scoring";
 import { semanticKnowledgeStore, type SemanticKnowledgeStore } from "./semantic-knowledge";
 import type { WordVectorEntry } from "./types";
@@ -21,6 +21,18 @@ export type RankedWord = {
   percentile: number;
   proximity: number;
   rank: number;
+};
+
+type ScoredEntry = {
+  word: string;
+  similarity: number;
+  rawHybrid: number;
+};
+
+type TargetRankingCache = {
+  targetWord: string;
+  scored: ScoredEntry[];
+  rankByWord: Map<string, number>;
 };
 
 function magnitude(vector: ArrayLike<number>) {
@@ -99,6 +111,7 @@ export class VectorStore {
   private readonly byWord: Map<string, WordVectorEntry>;
   private readonly targetEntries: WordVectorEntry[];
   private readonly knowledge: SemanticKnowledgeStore;
+  private readonly targetRankingCache = new Map<string, TargetRankingCache>();
 
   constructor(
     entries: WordVectorEntry[],
@@ -142,15 +155,48 @@ export class VectorStore {
     return targetPool[Math.floor(Math.random() * targetPool.length)];
   }
 
-  private scoreEntryAgainstTarget(targetWord: string, targetVector: ArrayLike<number>, entry: WordVectorEntry) {
-    const cosine = cosineSimilarity(targetVector, entry.vector);
-    const rawHybrid = computeHybridRawScore(targetWord, entry.word, cosine, this.knowledge);
+  private buildTargetRanking(targetWord: string, targetVector: ArrayLike<number>): TargetRankingCache {
+    const cached = this.targetRankingCache.get(targetWord);
+    if (cached) {
+      return cached;
+    }
 
-    return {
-      word: entry.word,
-      similarity: cosine,
-      rawHybrid,
+    const targetContext = this.knowledge.createTargetContext(targetWord);
+    const scored = this.entries.map((entry) => {
+      const similarity = cosineSimilarity(targetVector, entry.vector);
+      const features = computeHybridFeaturesWithContext(entry.word, similarity, targetContext, this.knowledge);
+
+      return {
+        word: entry.word,
+        similarity,
+        rawHybrid: features.rawHybrid,
+      };
+    });
+
+    scored.sort((first, second) => second.rawHybrid - first.rawHybrid || second.similarity - first.similarity);
+
+    const rankByWord = new Map<string, number>();
+    scored.forEach((entry, index) => {
+      rankByWord.set(entry.word, index + 1);
+    });
+
+    const ranking = {
+      targetWord,
+      scored,
+      rankByWord,
     };
+
+    this.targetRankingCache.set(targetWord, ranking);
+    return ranking;
+  }
+
+  warmTarget(targetWord: string) {
+    const target = this.get(targetWord);
+    if (!target) {
+      return;
+    }
+
+    this.buildTargetRanking(target.word, target.vector);
   }
 
   rankedWordsAgainstTarget(targetWord: string): RankedWord[] | undefined {
@@ -159,18 +205,16 @@ export class VectorStore {
       return undefined;
     }
 
-    const ranked = this.entries
-      .map((entry) => this.scoreEntryAgainstTarget(target.word, target.vector, entry))
-      .sort((first, second) => second.rawHybrid - first.rawHybrid || second.similarity - first.similarity);
+    const ranking = this.buildTargetRanking(target.word, target.vector);
 
-    return ranked.map((entry, index) => {
+    return ranking.scored.map((entry, index) => {
       const rank = index + 1;
 
       return {
         word: entry.word,
         similarity: entry.similarity,
         rank,
-        percentile: rankToPercentile(rank, ranked.length),
+        percentile: rankToPercentile(rank, ranking.scored.length),
         proximity: computeHybridDisplayScore(entry.rawHybrid, entry.word === targetWord),
       };
     });
@@ -183,23 +227,19 @@ export class VectorStore {
       return undefined;
     }
 
-    const scored = this.entries.map((entry) => this.scoreEntryAgainstTarget(target.word, target.vector, entry));
-    const guessScore = this.scoreEntryAgainstTarget(target.word, target.vector, guess);
-    let rank = 1;
+    const ranking = this.buildTargetRanking(target.word, target.vector);
+    const rank = ranking.rankByWord.get(guess.word);
+    const guessScore = ranking.scored.find((entry) => entry.word === guess.word);
 
-    for (const entry of scored) {
-      if (entry.rawHybrid > guessScore.rawHybrid) {
-        rank += 1;
-      }
+    if (rank === undefined || !guessScore) {
+      return undefined;
     }
-
-    const totalWords = this.entries.length;
 
     return {
       word: guess.word,
       similarity: guessScore.similarity,
       rank,
-      percentile: rankToPercentile(rank, totalWords),
+      percentile: rankToPercentile(rank, this.entries.length),
       proximity: computeHybridDisplayScore(guessScore.rawHybrid, guess.word === targetWord),
     };
   }

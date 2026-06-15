@@ -1,4 +1,4 @@
-import type { SemanticKnowledgeStore } from "./semantic-knowledge";
+import type { SemanticKnowledgeStore, TargetScoringContext } from "./semantic-knowledge";
 import { semanticKnowledgeStore } from "./semantic-knowledge";
 
 export type HybridFeatureScores = {
@@ -7,19 +7,60 @@ export type HybridFeatureScores = {
   synonymScore: number;
   conceptScore: number;
   graphScore: number;
+  fieldScore: number;
   rawHybrid: number;
 };
 
 export const HYBRID_WEIGHTS = {
-  embed: 0.65,
-  sememe: 0.1,
-  synonym: 0.1,
+  embed: 0.62,
+  sememe: 0.12,
+  field: 0.08,
+  synonym: 0.08,
   concept: 0.05,
-  graph: 0.1,
+  graph: 0.05,
 } as const;
 
 export function normalizeEmbedScore(cosineSimilarity: number) {
   return Math.min(1, Math.max(0, cosineSimilarity));
+}
+
+export function combineHybridScores(
+  embedScore: number,
+  knowledge: {
+    sememeScore: number;
+    synonymScore: number;
+    conceptScore: number;
+    graphScore: number;
+    fieldScore: number;
+  },
+) {
+  const rawHybrid =
+    HYBRID_WEIGHTS.embed * embedScore +
+    HYBRID_WEIGHTS.sememe * knowledge.sememeScore +
+    HYBRID_WEIGHTS.field * knowledge.fieldScore +
+    HYBRID_WEIGHTS.synonym * knowledge.synonymScore +
+    HYBRID_WEIGHTS.concept * knowledge.conceptScore +
+    HYBRID_WEIGHTS.graph * knowledge.graphScore;
+
+  return {
+    embedScore,
+    sememeScore: knowledge.sememeScore,
+    synonymScore: knowledge.synonymScore,
+    conceptScore: knowledge.conceptScore,
+    graphScore: knowledge.graphScore,
+    fieldScore: knowledge.fieldScore,
+    rawHybrid,
+  };
+}
+
+export function computeHybridFeaturesWithContext(
+  guessWord: string,
+  cosineSimilarity: number,
+  targetContext: TargetScoringContext,
+  knowledge: SemanticKnowledgeStore = semanticKnowledgeStore,
+): HybridFeatureScores {
+  const embedScore = normalizeEmbedScore(cosineSimilarity);
+  return combineHybridScores(embedScore, knowledge.knowledgeScores(targetContext, guessWord));
 }
 
 export function computeHybridFeatures(
@@ -28,27 +69,21 @@ export function computeHybridFeatures(
   cosineSimilarity: number,
   knowledge: SemanticKnowledgeStore = semanticKnowledgeStore,
 ): HybridFeatureScores {
-  const embedScore = normalizeEmbedScore(cosineSimilarity);
-  const sememeScore = knowledge.sememeScore(targetWord, guessWord);
-  const synonymScore = knowledge.synonymScore(targetWord, guessWord);
-  const conceptScore = knowledge.conceptScore(targetWord, guessWord);
-  const graphScore = knowledge.graphScore(targetWord, guessWord);
+  return computeHybridFeaturesWithContext(
+    guessWord,
+    cosineSimilarity,
+    knowledge.createTargetContext(targetWord),
+    knowledge,
+  );
+}
 
-  const rawHybrid =
-    HYBRID_WEIGHTS.embed * embedScore +
-    HYBRID_WEIGHTS.sememe * sememeScore +
-    HYBRID_WEIGHTS.synonym * synonymScore +
-    HYBRID_WEIGHTS.concept * conceptScore +
-    HYBRID_WEIGHTS.graph * graphScore;
-
-  return {
-    embedScore,
-    sememeScore,
-    synonymScore,
-    conceptScore,
-    graphScore,
-    rawHybrid,
-  };
+export function computeHybridRawScoreWithContext(
+  guessWord: string,
+  cosineSimilarity: number,
+  targetContext: TargetScoringContext,
+  knowledge: SemanticKnowledgeStore = semanticKnowledgeStore,
+) {
+  return computeHybridFeaturesWithContext(guessWord, cosineSimilarity, targetContext, knowledge).rawHybrid;
 }
 
 export function computeHybridRawScore(
