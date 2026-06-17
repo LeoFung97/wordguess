@@ -7,6 +7,15 @@ export type WordKnowledge = {
   concepts: string[];
 };
 
+export type TargetScoringContext = {
+  targetWord: string;
+  targetKnowledge: WordKnowledge;
+  targetSememes: Set<string>;
+  targetSynonyms: Set<string>;
+  targetConcepts: Set<string>;
+  distances: Map<string, number>;
+};
+
 type GraphEdge = {
   a: string;
   b: string;
@@ -23,16 +32,103 @@ const graphPath = path.join(process.cwd(), "data", "semantic-graph.json");
 
 const EMPTY_KNOWLEDGE: WordKnowledge = { sememes: [], synonyms: [], concepts: [] };
 
-function jaccardSimilarity(left: readonly string[], right: readonly string[]) {
-  if (left.length === 0 || right.length === 0) {
+class MinHeap {
+  private readonly nodes: string[] = [];
+  private readonly priorities: number[] = [];
+
+  get size() {
+    return this.nodes.length;
+  }
+
+  push(node: string, priority: number) {
+    this.nodes.push(node);
+    this.priorities.push(priority);
+    this.bubbleUp(this.nodes.length - 1);
+  }
+
+  pop(): { node: string; priority: number } | undefined {
+    if (this.nodes.length === 0) {
+      return undefined;
+    }
+
+    const node = this.nodes[0];
+    const priority = this.priorities[0];
+    const lastIndex = this.nodes.length - 1;
+    const lastNode = this.nodes[lastIndex];
+    const lastPriority = this.priorities[lastIndex];
+
+    this.nodes[0] = lastNode;
+    this.priorities[0] = lastPriority;
+    this.nodes.pop();
+    this.priorities.pop();
+
+    if (this.nodes.length > 0) {
+      this.bubbleDown(0);
+    }
+
+    return { node, priority };
+  }
+
+  private bubbleUp(index: number) {
+    while (index > 0) {
+      const parent = Math.floor((index - 1) / 2);
+      if (this.priorities[parent] <= this.priorities[index]) {
+        break;
+      }
+
+      this.swap(parent, index);
+      index = parent;
+    }
+  }
+
+  private bubbleDown(index: number) {
+    const length = this.nodes.length;
+
+    while (true) {
+      const left = index * 2 + 1;
+      const right = left + 1;
+      let smallest = index;
+
+      if (left < length && this.priorities[left] < this.priorities[smallest]) {
+        smallest = left;
+      }
+
+      if (right < length && this.priorities[right] < this.priorities[smallest]) {
+        smallest = right;
+      }
+
+      if (smallest === index) {
+        break;
+      }
+
+      this.swap(index, smallest);
+      index = smallest;
+    }
+  }
+
+  private swap(first: number, second: number) {
+    const node = this.nodes[first];
+    this.nodes[first] = this.nodes[second];
+    this.nodes[second] = node;
+
+    const priority = this.priorities[first];
+    this.priorities[first] = this.priorities[second];
+    this.priorities[second] = priority;
+  }
+}
+
+function toSet(values: readonly string[]) {
+  return new Set(values);
+}
+
+function jaccardFromSets(left: Set<string>, right: Set<string>) {
+  if (left.size === 0 || right.size === 0) {
     return 0;
   }
 
-  const rightSet = new Set(right);
   let intersection = 0;
-
   for (const item of left) {
-    if (rightSet.has(item)) {
+    if (right.has(item)) {
       intersection += 1;
     }
   }
@@ -41,16 +137,40 @@ function jaccardSimilarity(left: readonly string[], right: readonly string[]) {
   return union === 0 ? 0 : intersection / union;
 }
 
-function synonymRelationScore(target: WordKnowledge, guess: WordKnowledge, guessWord: string, targetWord: string) {
+function fieldCoverageScore(left: Set<string>, right: Set<string>) {
+  if (left.size === 0 || right.size === 0) {
+    return 0;
+  }
+
+  let intersection = 0;
+  for (const item of left) {
+    if (right.has(item)) {
+      intersection += 1;
+    }
+  }
+
+  if (intersection === 0) {
+    return 0;
+  }
+
+  return intersection / Math.min(left.size, right.size);
+}
+
+function synonymRelationScore(
+  targetSynonyms: Set<string>,
+  guessSynonyms: Set<string>,
+  guessWord: string,
+  targetWord: string,
+) {
   if (guessWord === targetWord) {
     return 1;
   }
 
-  if (target.synonyms.includes(guessWord) || guess.synonyms.includes(targetWord)) {
+  if (targetSynonyms.has(guessWord) || guessSynonyms.has(targetWord)) {
     return 1;
   }
 
-  return jaccardSimilarity(target.synonyms, guess.synonyms);
+  return jaccardFromSets(targetSynonyms, guessSynonyms);
 }
 
 function loadWordCache(): Map<string, WordKnowledge> {
@@ -98,6 +218,7 @@ export class SemanticKnowledgeStore {
   private readonly adjacency: Map<string, AdjacencyEntry[]>;
   private readonly lookupCache = new Map<string, WordKnowledge>();
   private readonly distanceCache = new Map<string, Map<string, number>>();
+  private readonly targetContextCache = new Map<string, TargetScoringContext>();
 
   readonly available: boolean;
 
@@ -118,22 +239,67 @@ export class SemanticKnowledgeStore {
     return knowledge;
   }
 
+  createTargetContext(targetWord: string): TargetScoringContext {
+    const cached = this.targetContextCache.get(targetWord);
+    if (cached) {
+      return cached;
+    }
+
+    const targetKnowledge = this.getWordKnowledge(targetWord);
+    const context: TargetScoringContext = {
+      targetWord,
+      targetKnowledge,
+      targetSememes: toSet(targetKnowledge.sememes),
+      targetSynonyms: toSet(targetKnowledge.synonyms),
+      targetConcepts: toSet(targetKnowledge.concepts),
+      distances: this.dijkstra(targetWord),
+    };
+
+    this.targetContextCache.set(targetWord, context);
+    return context;
+  }
+
+  knowledgeScores(targetContext: TargetScoringContext, guessWord: string) {
+    const guessKnowledge = this.getWordKnowledge(guessWord);
+    const guessSememes = toSet(guessKnowledge.sememes);
+    const pathDistance = targetContext.distances.get(guessWord);
+    const graphScore = pathDistance === undefined ? 0 : 1 / (1 + pathDistance);
+
+    return {
+      sememeScore: jaccardFromSets(targetContext.targetSememes, guessSememes),
+      synonymScore: synonymRelationScore(
+        targetContext.targetSynonyms,
+        toSet(guessKnowledge.synonyms),
+        guessWord,
+        targetContext.targetWord,
+      ),
+      conceptScore: jaccardFromSets(targetContext.targetConcepts, toSet(guessKnowledge.concepts)),
+      graphScore,
+      fieldScore: fieldCoverageScore(targetContext.targetSememes, guessSememes),
+    };
+  }
+
   sememeScore(targetWord: string, guessWord: string) {
     const target = this.getWordKnowledge(targetWord);
     const guess = this.getWordKnowledge(guessWord);
-    return jaccardSimilarity(target.sememes, guess.sememes);
+    return jaccardFromSets(toSet(target.sememes), toSet(guess.sememes));
   }
 
   synonymScore(targetWord: string, guessWord: string) {
     const target = this.getWordKnowledge(targetWord);
     const guess = this.getWordKnowledge(guessWord);
-    return synonymRelationScore(target, guess, guessWord, targetWord);
+    return synonymRelationScore(
+      toSet(target.synonyms),
+      toSet(guess.synonyms),
+      guessWord,
+      targetWord,
+    );
   }
 
   conceptScore(targetWord: string, guessWord: string) {
     const target = this.getWordKnowledge(targetWord);
     const guess = this.getWordKnowledge(guessWord);
-    return jaccardSimilarity(target.concepts, guess.concepts);
+    return jaccardFromSets(toSet(target.concepts), toSet(guess.concepts));
   }
 
   private dijkstra(source: string) {
@@ -143,28 +309,36 @@ export class SemanticKnowledgeStore {
     }
 
     const distances = new Map<string, number>();
-    const visited = new Set<string>();
-    const queue: Array<{ node: string; distance: number }> = [{ node: source, distance: 0 }];
+    const settled = new Set<string>();
+    const heap = new MinHeap();
 
-    while (queue.length > 0) {
-      queue.sort((first, second) => first.distance - second.distance);
-      const current = queue.shift();
-      if (!current || visited.has(current.node)) {
+    if (!this.adjacency.has(source)) {
+      this.distanceCache.set(source, distances);
+      return distances;
+    }
+
+    heap.push(source, 0);
+
+    while (heap.size > 0) {
+      const current = heap.pop();
+      if (!current || settled.has(current.node)) {
         continue;
       }
 
-      visited.add(current.node);
-      distances.set(current.node, current.distance);
+      settled.add(current.node);
+      distances.set(current.node, current.priority);
 
       for (const neighbor of this.adjacency.get(current.node) ?? []) {
-        if (visited.has(neighbor.node)) {
+        if (settled.has(neighbor.node)) {
           continue;
         }
 
-        queue.push({
-          node: neighbor.node,
-          distance: current.distance + neighbor.weight,
-        });
+        const nextDistance = current.priority + neighbor.weight;
+        const known = distances.get(neighbor.node);
+        if (known === undefined || nextDistance < known) {
+          distances.set(neighbor.node, nextDistance);
+          heap.push(neighbor.node, nextDistance);
+        }
       }
     }
 
@@ -173,12 +347,8 @@ export class SemanticKnowledgeStore {
   }
 
   graphScore(targetWord: string, guessWord: string) {
-    if (!this.adjacency.has(targetWord) || !this.adjacency.has(guessWord)) {
-      return 0;
-    }
-
-    const distances = this.dijkstra(targetWord);
-    const pathDistance = distances.get(guessWord);
+    const context = this.createTargetContext(targetWord);
+    const pathDistance = context.distances.get(guessWord);
     if (pathDistance === undefined) {
       return 0;
     }
@@ -190,5 +360,5 @@ export class SemanticKnowledgeStore {
 export const semanticKnowledgeStore = new SemanticKnowledgeStore();
 
 export function jaccardOverlap(left: readonly string[], right: readonly string[]) {
-  return jaccardSimilarity(left, right);
+  return jaccardFromSets(toSet(left), toSet(right));
 }
