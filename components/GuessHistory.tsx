@@ -27,7 +27,7 @@ function formatProximity(proximity: number) {
 }
 
 export function GuessHistory({ guesses, emptyText = "还没有猜词，试试第一个词。" }: GuessHistoryProps) {
-  const [view, setView] = useState<SortView>("latest");
+  const [view, setView] = useState<SortView>("ranking");
   const orderedGuesses = useMemo(() => sortGuesses(guesses, view), [guesses, view]);
 
   if (guesses.length === 0) {
@@ -97,7 +97,7 @@ export function GuessHistory({ guesses, emptyText = "还没有猜词，试试第
           <div className="mt-1.5 flex items-center justify-between text-[10px] text-white/45">
             <span>第 {guess.attempt} 次</span>
             <span>
-              排名 #{guess.rank} · {formatTopPercentLabel(guess.percentile)} · 相似度 {guess.similarity.toFixed(2)}
+              排名 #{guess.rank} · {formatTopPercentLabel(guess.percentile)}
             </span>
           </div>
         </article>
