@@ -12,6 +12,7 @@
     "prepare:tencent": "tsx scripts/prepare-vectors.ts --input=data/raw/light_Tencent_AILab_ChineseEmbedding.bin --words-output=data/words.json --vectors-output=data/vectors.f32 --max-four-char-words=10000",
     "prepare:tencent:full": "tsx scripts/prepare-vectors.ts --input=data/raw/Tencent_AILab_ChineseEmbedding.txt --words-output=data/words.json --vectors-output=data/vectors.f32",
     "prepare:semantic": ".venv-semantic/bin/python scripts/prepare-semantic-knowledge.py --content-only --workers 24 --chunk-size 512",
+    "prepare:semantic:rich": ".venv-semantic/bin/python scripts/prepare-semantic-knowledge.py --content-only --with-nearest --workers 24 --chunk-size 512",
     "prepare:semantic:sample": ".venv-semantic/bin/python scripts/prepare-semantic-knowledge.py --content-only --limit=5000 --workers 24 --chunk-size 512",
     "prepare:semantic:setup": "python3 -m venv .venv-semantic && .venv-semantic/bin/pip install -r requirements-semantic.txt"
   },
