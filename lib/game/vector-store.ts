@@ -2,7 +2,8 @@ import { readFileSync } from "fs";
 import path from "path";
 import targetWords from "../../data/target-words.json";
 import { computeHybridFeaturesWithContext } from "./hybrid-scorer";
-import { computeHybridDisplayScore, rankToPercentile } from "./scoring";
+import { computeHybridDisplayScore, computeSimilarityCalibration, rankToPercentile } from "./scoring";
+import type { SimilarityCalibration } from "./types";
 import { semanticKnowledgeStore, type SemanticKnowledgeStore } from "./semantic-knowledge";
 import type { WordVectorEntry } from "./types";
 
@@ -218,6 +219,15 @@ export class VectorStore {
         proximity: computeHybridDisplayScore(entry.rawHybrid, entry.word === targetWord),
       };
     });
+  }
+
+  calibrationForTarget(targetWord: string): SimilarityCalibration | undefined {
+    const ranked = this.rankedWordsAgainstTarget(targetWord);
+    if (!ranked) {
+      return undefined;
+    }
+
+    return computeSimilarityCalibration(ranked, targetWord);
   }
 
   rankAgainstTarget(targetWord: string, guessWord: string) {

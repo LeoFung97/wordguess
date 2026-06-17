@@ -37,7 +37,7 @@ function normalizePlayerName(name?: string) {
   return trimmed ? trimmed.slice(0, 16) : "匿名玩家";
 }
 
-function publicRoom(room: LobbyRoom) {
+function publicRoom(room: LobbyRoom, gameEngine: GameEngine) {
   return {
     roomCode: room.roomCode,
     players: Array.from(room.players.values()),
@@ -46,6 +46,7 @@ function publicRoom(room: LobbyRoom) {
     solved: room.session.solved,
     attempts: room.session.guesses.length,
     customTarget: room.customTarget,
+    calibration: gameEngine.getCalibration(room.session.targetWord),
   };
 }
 
@@ -96,8 +97,8 @@ export function registerLobbyHandlers(io: Server) {
         };
         rooms.set(roomCode, room);
         joinSocketToRoom(socket, room, payload.playerName);
-        ack({ ok: true, data: publicRoom(room) });
-        io.to(roomCode).emit("room:update", publicRoom(room));
+        ack({ ok: true, data: publicRoom(room, gameEngine) });
+        io.to(roomCode).emit("room:update", publicRoom(room, gameEngine));
       },
     );
 
@@ -111,8 +112,8 @@ export function registerLobbyHandlers(io: Server) {
       }
 
       joinSocketToRoom(socket, room, payload.playerName);
-      ack({ ok: true, data: publicRoom(room) });
-      io.to(room.roomCode).emit("room:update", publicRoom(room));
+      ack({ ok: true, data: publicRoom(room, gameEngine) });
+      io.to(room.roomCode).emit("room:update", publicRoom(room, gameEngine));
     });
 
     socket.on(
@@ -129,7 +130,7 @@ export function registerLobbyHandlers(io: Server) {
         try {
           const result = gameEngine.submitGuessToSession(room.session, payload.word, socket.data.playerName);
           ack({ ok: true, data: { guess: result.guess } });
-          io.to(room.roomCode).emit("room:update", publicRoom(room));
+          io.to(room.roomCode).emit("room:update", publicRoom(room, gameEngine));
         } catch (error) {
           ack({ ok: false, error: error instanceof Error ? error.message : "提交失败。" });
         }
@@ -151,8 +152,8 @@ export function registerLobbyHandlers(io: Server) {
       }
 
       gameEngine.resetSharedSession(room.session);
-      ack({ ok: true, data: publicRoom(room) });
-      io.to(room.roomCode).emit("room:update", publicRoom(room));
+      ack({ ok: true, data: publicRoom(room, gameEngine) });
+      io.to(room.roomCode).emit("room:update", publicRoom(room, gameEngine));
     });
 
     socket.on("hint:request", (payload: { roomCode?: string }, ack: ClientAck<{ guess: GuessResult }>) => {
@@ -167,7 +168,7 @@ export function registerLobbyHandlers(io: Server) {
       try {
         const result = gameEngine.revealHintInSession(room.session);
         ack({ ok: true, data: { guess: result.guess } });
-        io.to(room.roomCode).emit("room:update", publicRoom(room));
+        io.to(room.roomCode).emit("room:update", publicRoom(room, gameEngine));
       } catch (error) {
         ack({ ok: false, error: error instanceof Error ? error.message : "提示失败。" });
       }
@@ -190,7 +191,7 @@ export function registerLobbyHandlers(io: Server) {
         return;
       }
 
-      io.to(room.roomCode).emit("room:update", publicRoom(room));
+      io.to(room.roomCode).emit("room:update", publicRoom(room, gameEngine));
     });
   });
 }

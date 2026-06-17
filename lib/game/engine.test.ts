@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { GameEngine, formatSimilarity } from "./engine";
 import {
   computeHeatScore,
+  computeSimilarityCalibration,
   formatTopPercentLabel,
   rankToPercentile,
 } from "./scoring";
@@ -59,9 +60,43 @@ describe("vector helpers", () => {
     expect(computeHeatScore(0.1, minCos, maxCos)).toBe(0);
     expect(computeHeatScore(0.5, 0.5, 0.5)).toBe(50);
   });
+
+  it("builds semantle-style calibration anchors from ranked words", () => {
+    const ranked = [
+      { word: "目标", proximity: 100 },
+      { word: "最近", proximity: 78.26 },
+      { word: "第二", proximity: 70 },
+      { word: "第三", proximity: 65 },
+      { word: "第四", proximity: 60 },
+      { word: "第五", proximity: 58 },
+      { word: "第六", proximity: 56 },
+      { word: "第七", proximity: 55 },
+      { word: "第八", proximity: 54 },
+      { word: "第九", proximity: 53.5 },
+      { word: "第十", proximity: 52.81 },
+      { word: "更远", proximity: 19.76 },
+    ];
+
+    const calibration = computeSimilarityCalibration(ranked, "目标");
+
+    expect(calibration.nearest).toBeCloseTo(78.26);
+    expect(calibration.tenth).toBeCloseTo(52.81);
+    expect(calibration.thousandth).toBeCloseTo(19.76);
+  });
 });
 
 describe("game engine", () => {
+  it("includes per-target calibration when creating a game", () => {
+    const engine = new GameEngine(testStore);
+    const game = engine.createGame();
+
+    expect(game.calibration.nearest).toBeGreaterThan(0);
+    expect(game.calibration.tenth).toBeGreaterThanOrEqual(0);
+    expect(game.calibration.thousandth).toBeGreaterThanOrEqual(0);
+    expect(game.calibration.nearest).toBeGreaterThanOrEqual(game.calibration.tenth);
+    expect(game.calibration.tenth).toBeGreaterThanOrEqual(game.calibration.thousandth);
+  });
+
   it("scores guesses against a target word", () => {
     const engine = new GameEngine(testStore);
     const session = engine.createSharedSession("朋友");

@@ -7,8 +7,9 @@ import { Converter } from "opencc-js/t2cn";
 import { io, type Socket } from "socket.io-client";
 import { GuessForm } from "@/components/GuessForm";
 import { GuessHistory } from "@/components/GuessHistory";
+import { SimilarityCalibrationCard } from "@/components/SimilarityCalibrationCard";
 import { StatCard } from "@/components/StatCard";
-import type { GuessResult } from "@/lib/game/types";
+import type { GuessResult, SimilarityCalibration } from "@/lib/game/types";
 
 type Player = {
   id: string;
@@ -23,6 +24,7 @@ type PublicRoom = {
   solved: boolean;
   attempts: number;
   customTarget: boolean;
+  calibration: SimilarityCalibration;
 };
 
 type Ack<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -78,7 +80,13 @@ export default function LobbyPage() {
   function getSocket() {
     if (!socketRef.current) {
       const socket = io();
-      socket.on("room:update", (nextRoom: PublicRoom) => setRoom(nextRoom));
+      socket.on("room:update", (nextRoom: PublicRoom) => {
+        if (!nextRoom.calibration) {
+          return;
+        }
+
+        setRoom(nextRoom);
+      });
       socket.on("connect", () => {
         const currentRoom = roomRef.current;
         if (!currentRoom) {
@@ -138,6 +146,11 @@ export default function LobbyPage() {
         return;
       }
 
+      if (!result.data.calibration) {
+        setError("服务器未返回参考刻度，请刷新后重试。");
+        return;
+      }
+
       setRoom(result.data);
       if (requestedRoomCode === "NEW") {
         window.history.replaceState(null, "", `/lobby/${result.data.roomCode}`);
@@ -175,7 +188,10 @@ export default function LobbyPage() {
       setIsResetting(false);
       if (!result.ok) {
         setError(result.error);
+        return;
       }
+
+      setRoom(result.data);
     });
   }
 
@@ -313,10 +329,12 @@ export default function LobbyPage() {
             <p className="text-sm text-teal-100">大厅模式</p>
             <h1 className="mt-3 text-4xl font-black text-white">房间 {room.roomCode}</h1>
             <p className="mt-4 leading-7 text-white/60">
-              和朋友一起猜同一个目标词。每个人的猜测都会实时同步。
+              和朋友一起猜同一个目标词。每个人的猜测都会实时同步，可参考下方刻度判断热度。
               {room.customTarget ? " 本房间由房主指定了目标词。" : " 本房间使用随机目标词。"}
             </p>
           </div>
+
+          <SimilarityCalibrationCard calibration={room.calibration} />
 
           <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-1">
             <StatCard label="在线玩家" value={room.players.length} />

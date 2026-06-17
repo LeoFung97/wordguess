@@ -43,13 +43,19 @@ export function bestGuess(guesses: GuessResult[]) {
     .toSorted((first, second) => second.proximity - first.proximity || first.rank - second.rank)[0];
 }
 
-export function toPublicGameState(session: GameSession): PublicGameState {
+export function toPublicGameState(session: GameSession, store: VectorStore = vectorStore): PublicGameState {
+  const calibration = store.calibrationForTarget(session.targetWord);
+  if (!calibration) {
+    throw new Error("无法计算本局的参考刻度。");
+  }
+
   return {
     gameId: session.gameId,
     guesses: session.guesses,
     bestGuess: bestGuess(session.guesses),
     solved: session.solved,
     attempts: session.guesses.length,
+    calibration,
   };
 }
 
@@ -76,6 +82,15 @@ export class GameEngine {
 
   constructor(private readonly store: VectorStore = vectorStore) {}
 
+  getCalibration(targetWord: string) {
+    const calibration = this.store.calibrationForTarget(targetWord);
+    if (!calibration) {
+      throw new Error("无法计算本局的参考刻度。");
+    }
+
+    return calibration;
+  }
+
   createGame(): CreateGameResult {
     const target = this.store.randomTarget();
     this.store.warmTarget(target.word);
@@ -89,7 +104,7 @@ export class GameEngine {
     this.sessions.set(session.gameId, session);
 
     return {
-      ...toPublicGameState(session),
+      ...toPublicGameState(session, this.store),
       targetLength: target.word.length,
     };
   }
@@ -124,7 +139,7 @@ export class GameEngine {
 
   getGame(gameId: string) {
     const session = this.sessions.get(gameId);
-    return session ? toPublicGameState(session) : undefined;
+    return session ? toPublicGameState(session, this.store) : undefined;
   }
 
   submitGuess(gameId: string, rawWord: string, playerName?: string) {
@@ -171,7 +186,7 @@ export class GameEngine {
 
     return {
       guess,
-      state: toPublicGameState(session),
+      state: toPublicGameState(session, this.store),
     };
   }
 
@@ -201,7 +216,7 @@ export class GameEngine {
 
     return {
       guess,
-      state: toPublicGameState(session),
+      state: toPublicGameState(session, this.store),
     };
   }
 }

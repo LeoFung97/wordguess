@@ -1,5 +1,29 @@
+import type { SimilarityCalibration } from "./types";
+
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+function calibrationAt(proximities: number[], index: number) {
+  if (proximities.length === 0) {
+    return 0;
+  }
+
+  return proximities[Math.min(index, proximities.length - 1)] ?? 0;
+}
+
+/** Semantle-style reference anchors for the current target (excludes the answer). */
+export function computeSimilarityCalibration(
+  ranked: { word: string; proximity: number }[],
+  targetWord: string,
+): SimilarityCalibration {
+  const proximities = ranked.filter((entry) => entry.word !== targetWord).map((entry) => entry.proximity);
+
+  return {
+    nearest: calibrationAt(proximities, 0),
+    tenth: calibrationAt(proximities, 9),
+    thousandth: calibrationAt(proximities, 999),
+  };
 }
 
 export function rankToPercentile(rank: number, totalWords: number) {

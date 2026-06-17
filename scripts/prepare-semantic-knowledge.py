@@ -22,6 +22,7 @@ import os
 import re
 import sys
 import time
+from collections import Counter
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import TypedDict
@@ -39,21 +40,26 @@ DEFAULT_CACHE_PATH = ROOT / "data" / "semantic-word-cache.json"
 DEFAULT_GRAPH_PATH = ROOT / "data" / "semantic-graph.json"
 
 # Edge weights — lower = closer semantic relation (path cost).
-WEIGHT_SYNONYM = 1.0
+WEIGHT_SYNONYM_SENSE = 0.75
+WEIGHT_SYNONYM_STRONG = 1.0
+WEIGHT_SYNONYM = 1.25
+WEIGHT_SYNONYM_WEAK = 1.75
 WEIGHT_SEMEME = 1.5
 WEIGHT_HYPERNYM = 2.5
 WEIGHT_WEAK = 4.0
 
-NEAREST_K = 12
+SYNONYM_K = 20
+NEAREST_MIN_SCORE = 0.6
 CHINESE_RE = re.compile(r"^[\u4e00-\u9fff]+$")
 
 CPU_COUNT = os.cpu_count() or 8
 
 
-class WordKnowledge(TypedDict):
+class WordKnowledge(TypedDict, total=False):
     sememes: list[str]
     synonyms: list[str]
     concepts: list[str]
+    synonym_weights: dict[str, float]
 
 
 class GraphEdge(TypedDict):
@@ -143,42 +149,163 @@ def sememe_node(sememe: str) -> str:
     return f"sememe:{sememe}"
 
 
-def build_sememe_synonyms(
+def sense_zh_word(sense) -> str | None:
+    parts = str(sense).split("|")
+    if len(parts) >= 3 and parts[2]:
+        return parts[2]
+    return None
+
+
+def word_sememes_from_index(sememe_to_words: dict[str, list[str]], word: str) -> list[str]:
+    return sememe_to_words.get(f"__sememes__:{word}", [])
+
+
+def sememe_overlap_rank(
+    word: str,
+    candidates: list[str],
+    sememe_to_words: dict[str, list[str]],
+) -> list[tuple[str, int, float]]:
+    source = set(word_sememes_from_index(sememe_to_words, word))
+    if not source:
+        return []
+
+    ranked: list[tuple[str, int, float]] = []
+    for candidate in candidates:
+        if candidate == word:
+            continue
+
+        target = set(word_sememes_from_index(sememe_to_words, candidate))
+        if not target:
+            continue
+
+        overlap = len(source & target)
+        union = source | target
+        ranked.append((candidate, overlap, overlap / len(union)))
+
+    ranked.sort(key=lambda item: (-item[1], -item[2], item[0]))
+    return ranked
+
+
+def extract_sense_synonym_words(hownet, word: str, vocabulary: set[str]) -> list[str]:
+    synonyms: list[str] = []
+    seen: set[str] = set()
+
+    try:
+        senses = hownet.get_sense(word, language="zh") or []
+    except Exception:
+        return synonyms
+
+    for sense in senses:
+        try:
+            related = hownet.get_sense_synonyms(sense) or []
+        except Exception:
+            continue
+
+        for related_sense in related:
+            candidate = sense_zh_word(related_sense)
+            if not candidate or candidate == word or candidate not in vocabulary or candidate in seen:
+                continue
+            seen.add(candidate)
+            synonyms.append(candidate)
+
+    return synonyms
+
+
+def build_ranked_sememe_synonyms(
     word: str,
     sememes: list[str],
     sememe_to_words: dict[str, list[str]],
     vocabulary: set[str],
-) -> list[str]:
-    candidates: set[str] = set()
+) -> list[tuple[str, int, float]]:
+    scores: Counter[str] = Counter()
+    sememe_set = set(sememes)
+
     for sememe in sememes:
         for candidate in sememe_to_words.get(sememe, ()):
             if candidate != word and candidate in vocabulary:
-                candidates.add(candidate)
-    return sorted(candidates)[:NEAREST_K]
+                scores[candidate] += 1
+
+    ranked: list[tuple[str, int, float]] = []
+    for candidate, overlap in scores.items():
+        candidate_sememes = set(word_sememes_from_index(sememe_to_words, candidate))
+        if not candidate_sememes:
+            continue
+        ranked.append((candidate, overlap, overlap / len(sememe_set | candidate_sememes)))
+
+    ranked.sort(key=lambda item: (-item[1], -item[2], item[0]))
+    return ranked
 
 
-def extract_synonyms(
+def sememe_link_weight(overlap: int, jaccard: float) -> float:
+    if overlap >= 2 or jaccard >= 0.5:
+        return WEIGHT_SYNONYM_STRONG
+    return WEIGHT_SYNONYM_WEAK
+
+
+def nearest_link_weight(score: float) -> float:
+    if score >= 0.8:
+        return WEIGHT_SYNONYM_STRONG
+    if score >= NEAREST_MIN_SCORE:
+        return WEIGHT_SYNONYM
+    return WEIGHT_SYNONYM_WEAK
+
+
+def extract_synonym_links(
     hownet,
     word: str,
     vocabulary: set[str],
     sememes: list[str],
     sememe_to_words: dict[str, list[str]],
     use_nearest: bool,
-) -> list[str]:
-    synonyms = build_sememe_synonyms(word, sememes, sememe_to_words, vocabulary)
+) -> list[tuple[str, float]]:
+    links: dict[str, float] = {}
 
-    if not use_nearest:
-        return synonyms
+    for candidate in extract_sense_synonym_words(hownet, word, vocabulary):
+        links[candidate] = min(links.get(candidate, 99.0), WEIGHT_SYNONYM_SENSE)
 
-    try:
-        nearest = hownet.get_nearest_words(word, language="zh", merge=True, K=NEAREST_K) or []
-        for candidate in nearest:
-            if candidate in vocabulary and candidate != word:
-                synonyms.append(candidate)
-    except Exception:
-        pass
+    if use_nearest:
+        try:
+            nearest = (
+                hownet.get_nearest_words(
+                    word,
+                    language="zh",
+                    merge=True,
+                    K=SYNONYM_K,
+                    score=True,
+                )
+                or []
+            )
+            for item in nearest:
+                if isinstance(item, tuple):
+                    candidate, score = item
+                else:
+                    candidate, score = item, 1.0
+                if candidate == word or candidate not in vocabulary:
+                    continue
+                weight = nearest_link_weight(float(score))
+                links[candidate] = min(links.get(candidate, 99.0), weight)
+        except Exception:
+            pass
 
-    return sorted(set(synonyms))[:NEAREST_K]
+    for candidate, overlap, jaccard in build_ranked_sememe_synonyms(
+        word,
+        sememes,
+        sememe_to_words,
+        vocabulary,
+    ):
+        weight = sememe_link_weight(overlap, jaccard)
+        links[candidate] = min(links.get(candidate, 99.0), weight)
+
+    if not links:
+        return []
+
+    ranked = sememe_overlap_rank(word, list(links.keys()), sememe_to_words)
+    return [(candidate, links[candidate]) for candidate, _, _ in ranked[:SYNONYM_K]]
+
+
+def apply_synonym_links(cache_entry: WordKnowledge, links: list[tuple[str, float]]) -> None:
+    cache_entry["synonyms"] = [word for word, _ in links]
+    cache_entry["synonym_weights"] = {word: weight for word, weight in links}
 
 
 def lookup_word_knowledge(hownet, word: str) -> WordKnowledge:
@@ -197,7 +324,8 @@ def lookup_word_knowledge(hownet, word: str) -> WordKnowledge:
 def _init_worker(use_nearest: bool) -> None:
     global _worker_hownet, _worker_use_nearest
     _worker_use_nearest = use_nearest
-    _worker_hownet = OpenHowNet.HowNetDict(init_sim=use_nearest)
+    # Sense synonyms require the similarity tables even when --with-nearest is off.
+    _worker_hownet = OpenHowNet.HowNetDict(init_sim=True)
 
 
 def _lookup_words_chunk(words: list[str]) -> list[tuple[str, WordKnowledge]]:
@@ -207,11 +335,11 @@ def _lookup_words_chunk(words: list[str]) -> list[tuple[str, WordKnowledge]]:
 
 def _synonyms_for_chunk(
     payload: tuple[list[str], dict[str, list[str]], list[str], bool],
-) -> list[tuple[str, list[str]]]:
+) -> list[tuple[str, list[tuple[str, float]]]]:
     words, sememe_to_words, vocabulary_list, use_nearest = payload
     vocabulary = set(vocabulary_list)
     assert _worker_hownet is not None
-    results: list[tuple[str, list[str]]] = []
+    results: list[tuple[str, list[tuple[str, float]]]] = []
     for word in words:
         sememes = sememe_to_words.get(f"__sememes__:{word}")
         if sememes is None:
@@ -219,7 +347,7 @@ def _synonyms_for_chunk(
         results.append(
             (
                 word,
-                extract_synonyms(
+                extract_synonym_links(
                     _worker_hownet,
                     word,
                     vocabulary,
@@ -269,26 +397,30 @@ def parallel_map(
     items: list,
     label: str,
     total_units: int | None = None,
+    units_per_item: int = 1,
 ) -> list:
     if not items:
         return []
 
     results = []
-    total = total_units if total_units is not None else len(items)
-    completed_units = 0
+    total = total_units if total_units is not None else len(items) * units_per_item
+    work_done = 0
+    reported = 0
+    report_every = max(1, total // 20)
     started = time.perf_counter()
 
     futures = [executor.submit(function, item) for item in items]
     for future in as_completed(futures):
         results.append(future.result())
-        completed_units += 1
-        if completed_units % max(1, total // 20) == 0 or completed_units == total:
+        work_done = min(total, work_done + units_per_item)
+        if work_done - reported >= report_every or work_done >= total:
             elapsed = time.perf_counter() - started
-            rate = completed_units / elapsed if elapsed > 0 else 0
+            rate = work_done / elapsed if elapsed > 0 else 0
             print(
-                f"  {label}: {completed_units}/{total} ({rate:.1f}/s)",
+                f"  {label}: {work_done}/{total} ({rate:.1f}/s)",
                 file=sys.stderr,
             )
+            reported = work_done
 
     return results
 
@@ -309,7 +441,14 @@ def build_word_cache_parallel(
         initializer=_init_worker,
         initargs=(use_nearest,),
     ) as executor:
-        for chunk_result in parallel_map(executor, _lookup_words_chunk, chunks, "Lookups", len(words)):
+        for chunk_result in parallel_map(
+            executor,
+            _lookup_words_chunk,
+            chunks,
+            "Lookups",
+            len(words),
+            units_per_item=chunk_size,
+        ):
             for word, knowledge in chunk_result:
                 cache[word] = knowledge
 
@@ -322,16 +461,20 @@ def build_word_cache_parallel(
         synonym_chunks = [
             (chunk, sememe_to_words, list(vocabulary), use_nearest) for chunk in chunks
         ]
-        print(f"  Synonym pass: {len(words)} words, {workers} workers", file=sys.stderr)
+        print(
+            f"  Synonym pass: {len(words)} words, {len(chunks)} chunks, {workers} workers",
+            file=sys.stderr,
+        )
         for chunk_result in parallel_map(
             executor,
             _synonyms_for_chunk,
             synonym_chunks,
             "Synonyms",
             len(words),
+            units_per_item=chunk_size,
         ):
-            for word, synonyms in chunk_result:
-                cache[word]["synonyms"] = synonyms
+            for word, synonym_links in chunk_result:
+                apply_synonym_links(cache[word], synonym_links)
 
     return cache
 
@@ -356,13 +499,16 @@ def build_word_cache_serial(
             sememe_to_words.setdefault(sememe, []).append(word)
 
     for word in words:
-        cache[word]["synonyms"] = extract_synonyms(
-            hownet,
-            word,
-            vocabulary,
-            cache[word]["sememes"],
-            sememe_to_words,
-            use_nearest,
+        apply_synonym_links(
+            cache[word],
+            extract_synonym_links(
+                hownet,
+                word,
+                vocabulary,
+                cache[word]["sememes"],
+                sememe_to_words,
+                use_nearest,
+            ),
         )
 
     return cache
@@ -386,9 +532,16 @@ def collect_graph_edges(
         for concept in knowledge["concepts"]:
             node = concept_node(concept)
             edges.append({"a": word, "b": node, "w": WEIGHT_SEMEME})
-        for synonym in knowledge["synonyms"]:
+        synonym_weights = knowledge.get("synonym_weights") or {}
+        for synonym in knowledge.get("synonyms") or []:
             if synonym in vocabulary:
-                edges.append({"a": word, "b": synonym, "w": WEIGHT_SYNONYM})
+                edges.append(
+                    {
+                        "a": word,
+                        "b": synonym,
+                        "w": float(synonym_weights.get(synonym, WEIGHT_SYNONYM_STRONG)),
+                    }
+                )
 
     sememe_list = sorted(all_sememes)
     print(
@@ -448,7 +601,10 @@ def main() -> None:
     parser.add_argument(
         "--with-nearest",
         action="store_true",
-        help="Also use OpenHowNet nearest-word similarity (slower; enables init_sim).",
+        help=(
+            "Also merge OpenHowNet nearest-word neighbors into synonym edges "
+            "(slower; sense synonyms are always included)."
+        ),
     )
     parser.add_argument(
         "--workers",
@@ -486,8 +642,8 @@ def main() -> None:
     )
 
     if args.serial:
-        print("Initializing OpenHowNet" + (" (with similarity index)..." if args.with_nearest else "..."))
-        hownet = OpenHowNet.HowNetDict(init_sim=args.with_nearest)
+        print("Initializing OpenHowNet (with similarity tables for sense synonyms)...")
+        hownet = OpenHowNet.HowNetDict(init_sim=True)
         word_cache = build_word_cache_serial(hownet, words, vocabulary, args.with_nearest)
         print("Building semantic graph...")
         edges = collect_graph_edges(words, word_cache, vocabulary, workers=1)
