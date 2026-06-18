@@ -103,9 +103,9 @@ describe("external reference: 海豚 order", () => {
 });
 
 describe("external reference: 星空 order", () => {
-  it("ranks sky-cluster words above 航空", () => {
+  it("ranks literal sky-cluster words above 航空", () => {
     const aviation = rankFor(STARRY_SKY_REFERENCE.target, "航空");
-    for (const word of ["星星", "天空", "星河", "航天"]) {
+    for (const word of ["星星", "天空", "星河"]) {
       expect(rankFor(STARRY_SKY_REFERENCE.target, word)).toBeLessThan(aviation);
     }
   });

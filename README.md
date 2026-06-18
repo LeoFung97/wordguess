@@ -56,7 +56,31 @@ npm run prepare:fasttext -- --top-k=80k
 
 目标词仍由 `data/target-words.json` 控制（二字词）；猜词接受词库中 1 到 4 字的词。
 
-## 准备语义知识缓存
+## 准备目标词列表
+
+在 `prepare:fasttext`（以及可选的 `prepare:semantic`）之后，可用 BCC 词频表生成本地可玩的二字目标词候选：
+
+```bash
+npm run prepare:targets
+npm run prepare:targets:write   # 同时覆盖 data/target-words.json
+```
+
+输出：
+
+- `data/generated/target-words-ranked.json` — 按综合分排序的保留词及分数
+- `data/generated/target-words-filtered.json` — 被过滤词及原因
+- `data/generated/target-words-debug.tsv` — 完整诊断表
+
+`data/generated/` 为可再生的管线输出目录（已在 `.gitignore` 中忽略）。
+
+常用阈值（均可通过 CLI 覆盖）：
+
+```bash
+npm run prepare:targets -- --min-frequency-rank=80 --max-frequency-rank=25000 --output-limit=2000
+```
+
+综合分以词频为主（默认权重 0.62），并结合可玩性启发式与 embedding / 语义缓存近邻质量重排。`weight-freshness` 预留供后续新语料加成，当前默认为 0。
+
 
 在 `prepare:fasttext` 之后运行：
 
@@ -68,6 +92,44 @@ npm run prepare:semantic
 这会处理 `prepare:fasttext` 生成的全部词库（`data/words.json`），并用 fastText 余弦相似度生成近邻同义词边。词库大小由 `prepare:fasttext --top-k` 控制，semantic 不再单独筛词。
 
 `data/raw/` 和大体积原始模型文件默认不会进入 git。
+
+### 语义 artifact 格式（schema v2）
+
+`prepare:semantic` 会写入：
+
+- `data/semantic-word-cache.json` — 每词 OpenHowNet 特征与可选元数据
+- `data/semantic-graph.json` — 加权边列表，供运行时 Dijkstra 使用
+
+**Word cache 字段（向后兼容）：**
+
+| 字段 | 说明 |
+|------|------|
+| `sememes` | 全部义原（核心 + 扩展），旧版 artifact 仍可用 |
+| `core_sememes` | 直接挂载义原（主信号） |
+| `expanded_sememes` | 树/上位扩展义原（弱信号） |
+| `domain` | 主导语义域，如 `weather/climate` |
+| `usage_bias` | `literal` / `figurative` / `mixed` / `unknown` |
+| `sense_count` | OpenHowNet 义项数 |
+| `synonyms` / `concepts` / `synonym_weights` | 同现有逻辑 |
+
+旧 artifact 缺少新字段时，运行时会回退：`core_sememes` ← `sememes`，`domain` ← `abstract/general`。
+
+**重建步骤（部署前离线执行一次）：**
+
+```bash
+npm run prepare:fasttext          # 若词库/向量有变
+npm run prepare:semantic:setup    # 首次或依赖变更
+npm run prepare:semantic          # 重建 cache + graph
+npm run test
+```
+
+**调试某对 (目标, 猜测) 的打分组成：**
+
+```bash
+tsx scripts/explain-hybrid-score.ts 气候 天气
+```
+
+运行时仅读取预构建 JSON，不在 Railway 上调用 OpenHowNet 或写持久化文件。
 
 ## 大厅模式说明
 

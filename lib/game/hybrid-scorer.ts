@@ -1,4 +1,4 @@
-import type { SemanticKnowledgeStore, TargetScoringContext } from "./semantic-knowledge";
+import type { KnowledgeFeatureScores, SemanticKnowledgeStore, TargetScoringContext } from "./semantic-knowledge";
 import { semanticKnowledgeStore } from "./semantic-knowledge";
 
 export type HybridFeatureScores = {
@@ -8,6 +8,8 @@ export type HybridFeatureScores = {
   conceptScore: number;
   graphScore: number;
   fieldScore: number;
+  domainScore: number;
+  usageBiasMultiplier: number;
   rawHybrid: number;
 };
 
@@ -25,13 +27,7 @@ export function normalizeEmbedScore(cosineSimilarity: number) {
 
 export function combineHybridScores(
   embedScore: number,
-  knowledge: {
-    sememeScore: number;
-    synonymScore: number;
-    conceptScore: number;
-    graphScore: number;
-    fieldScore: number;
-  },
+  knowledge: KnowledgeFeatureScores,
 ) {
   const rawHybrid =
     HYBRID_WEIGHTS.embed * embedScore +
@@ -47,6 +43,8 @@ export function combineHybridScores(
     conceptScore: knowledge.conceptScore,
     graphScore: knowledge.graphScore,
     fieldScore: knowledge.fieldScore,
+    domainScore: knowledge.domainScore,
+    usageBiasMultiplier: knowledge.usageBiasMultiplier,
     rawHybrid,
   };
 }

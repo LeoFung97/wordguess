@@ -4,8 +4,8 @@ import targetWords from "../../data/target-words.json";
 import { computeHybridFeaturesWithContext } from "./hybrid-scorer";
 import {
   buildTargetDisplayCalibration,
+  calibrationFromScoredNeighbors,
   mapCalibratedDisplayScore,
-  computeSimilarityCalibration,
   rankToPercentile,
   type TargetDisplayCalibration,
 } from "./scoring";
@@ -41,6 +41,7 @@ type TargetRankingCache = {
   scored: ScoredEntry[];
   rankByWord: Map<string, number>;
   displayCalibration: TargetDisplayCalibration;
+  calibration: SimilarityCalibration;
 };
 
 function magnitude(vector: ArrayLike<number>) {
@@ -188,15 +189,31 @@ export class VectorStore {
       rankByWord.set(entry.word, index + 1);
     });
 
+    const displayCalibration = buildTargetDisplayCalibration(scored, targetWord);
     const ranking = {
       targetWord,
       scored,
       rankByWord,
-      displayCalibration: buildTargetDisplayCalibration(scored, targetWord),
+      displayCalibration,
+      calibration: calibrationFromScoredNeighbors(scored, targetWord, displayCalibration),
     };
 
     this.targetRankingCache.set(targetWord, ranking);
     return ranking;
+  }
+
+  private toRankedWord(ranking: TargetRankingCache, entry: ScoredEntry, rank: number): RankedWord {
+    return {
+      word: entry.word,
+      similarity: entry.similarity,
+      rank,
+      percentile: rankToPercentile(rank, ranking.scored.length),
+      proximity: mapCalibratedDisplayScore(
+        entry.rawHybrid,
+        ranking.displayCalibration,
+        entry.word === ranking.targetWord,
+      ),
+    };
   }
 
   warmTarget(targetWord: string) {
@@ -216,30 +233,49 @@ export class VectorStore {
 
     const ranking = this.buildTargetRanking(target.word, target.vector);
 
-    return ranking.scored.map((entry, index) => {
-      const rank = index + 1;
-
-      return {
-        word: entry.word,
-        similarity: entry.similarity,
-        rank,
-        percentile: rankToPercentile(rank, ranking.scored.length),
-        proximity: mapCalibratedDisplayScore(
-          entry.rawHybrid,
-          ranking.displayCalibration,
-          entry.word === targetWord,
-        ),
-      };
-    });
+    return ranking.scored.map((entry, index) => this.toRankedWord(ranking, entry, index + 1));
   }
 
   calibrationForTarget(targetWord: string): SimilarityCalibration | undefined {
-    const ranked = this.rankedWordsAgainstTarget(targetWord);
-    if (!ranked) {
+    const target = this.get(targetWord);
+    if (!target) {
       return undefined;
     }
 
-    return computeSimilarityCalibration(ranked, targetWord);
+    return this.buildTargetRanking(target.word, target.vector).calibration;
+  }
+
+  pickHintAgainstTarget(
+    targetWord: string,
+    options: { guessedWords: Set<string>; minRank: number },
+  ): RankedWord | undefined {
+    const target = this.get(targetWord);
+    if (!target) {
+      return undefined;
+    }
+
+    const ranking = this.buildTargetRanking(target.word, target.vector);
+    const startIndex = Math.max(0, options.minRank - 1);
+
+    for (let index = startIndex; index < ranking.scored.length; index += 1) {
+      const entry = ranking.scored[index];
+      if (entry.word === targetWord || options.guessedWords.has(entry.word)) {
+        continue;
+      }
+
+      return this.toRankedWord(ranking, entry, index + 1);
+    }
+
+    for (let index = 1; index < ranking.scored.length; index += 1) {
+      const entry = ranking.scored[index];
+      if (entry.word === targetWord || options.guessedWords.has(entry.word)) {
+        continue;
+      }
+
+      return this.toRankedWord(ranking, entry, index + 1);
+    }
+
+    return undefined;
   }
 
   rankAgainstTarget(targetWord: string, guessWord: string) {
@@ -251,23 +287,17 @@ export class VectorStore {
 
     const ranking = this.buildTargetRanking(target.word, target.vector);
     const rank = ranking.rankByWord.get(guess.word);
-    const guessScore = ranking.scored.find((entry) => entry.word === guess.word);
 
-    if (rank === undefined || !guessScore) {
+    if (rank === undefined) {
       return undefined;
     }
 
-    return {
-      word: guess.word,
-      similarity: guessScore.similarity,
-      rank,
-      percentile: rankToPercentile(rank, this.entries.length),
-      proximity: mapCalibratedDisplayScore(
-        guessScore.rawHybrid,
-        ranking.displayCalibration,
-        guess.word === targetWord,
-      ),
-    };
+    const guessScore = ranking.scored[rank - 1];
+    if (!guessScore || guessScore.word !== guess.word) {
+      return undefined;
+    }
+
+    return this.toRankedWord(ranking, guessScore, rank);
   }
 }
 

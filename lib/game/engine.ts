@@ -195,17 +195,13 @@ export class GameEngine {
       throw new Error("这一局已经结束。");
     }
 
-    const ranked = this.store.rankedWordsAgainstTarget(session.targetWord);
-    if (!ranked) {
-      throw new Error("无法生成提示。");
-    }
-
     const guessedWords = new Set(session.guesses.map((guess) => guess.word));
-    const bestRank = bestGuess(session.guesses)?.rank ?? ranked.length;
+    const bestRank = bestGuess(session.guesses)?.rank ?? Number.MAX_SAFE_INTEGER;
     const targetRank = Math.max(2, Math.floor(bestRank * 0.6));
-    const hint =
-      ranked.find((entry) => entry.rank >= targetRank && entry.word !== session.targetWord && !guessedWords.has(entry.word)) ??
-      ranked.find((entry) => entry.rank > 1 && entry.word !== session.targetWord && !guessedWords.has(entry.word));
+    const hint = this.store.pickHintAgainstTarget(session.targetWord, {
+      guessedWords,
+      minRank: targetRank,
+    });
 
     if (!hint) {
       throw new Error("没有可用提示了。");
