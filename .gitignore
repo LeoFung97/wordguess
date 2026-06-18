@@ -14,3 +14,5 @@ data/raw
 data/*.bin
 data/*.tar.gz
 data/*.txt
+data/*.vec
+data/*.vec.gz

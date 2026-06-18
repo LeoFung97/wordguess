@@ -5,7 +5,7 @@ import {
   computeHybridRawScore,
   normalizeEmbedScore,
 } from "./hybrid-scorer";
-import { computeHybridDisplayScore } from "./scoring";
+import { buildTargetDisplayCalibration, mapCalibratedDisplayScore } from "./scoring";
 import { SemanticKnowledgeStore } from "./semantic-knowledge";
 import { cosineSimilarity, VectorStore } from "./vector-store";
 
@@ -104,12 +104,17 @@ describe("hybrid semantic scoring", () => {
 
     expect(goldfishHybrid).toBeGreaterThan(birdHybrid);
 
-    const goldfishDisplay = computeHybridDisplayScore(goldfishHybrid);
-    const birdDisplay = computeHybridDisplayScore(birdHybrid);
+    const goldfish = fishStore.rankAgainstTarget("鲤鱼", "金鱼");
+    const bird = fishStore.rankAgainstTarget("鲤鱼", "鸟");
+
+    expect(goldfish).toBeDefined();
+    expect(bird).toBeDefined();
+    expect(goldfish!.rank).toBeLessThan(bird!.rank);
+    expect(goldfish!.proximity).toBeGreaterThan(bird!.proximity);
+
     const goldfishCosineOnly = computeCosineOnlyDisplayScore(goldfishCos);
     const birdCosineOnly = computeCosineOnlyDisplayScore(birdCos);
-
-    expect(goldfishDisplay - birdDisplay).toBeGreaterThan(goldfishCosineOnly - birdCosineOnly);
+    expect(goldfish!.proximity - bird!.proximity).toBeGreaterThan(goldfishCosineOnly - birdCosineOnly);
   });
 
   it("exposes individual knowledge features with safe zero fallbacks", () => {
@@ -124,7 +129,7 @@ describe("hybrid semantic scoring", () => {
     expect(missing.sememeScore).toBe(0);
     expect(missing.synonymScore).toBe(0);
     expect(missing.graphScore).toBe(0);
-    expect(missing.rawHybrid).toBeCloseTo(0.62 * 0.5);
+    expect(missing.rawHybrid).toBeCloseTo(0.75 * 0.5);
   });
 
   it("ranks guesses by hybrid score in VectorStore", () => {
@@ -137,9 +142,16 @@ describe("hybrid semantic scoring", () => {
     expect(goldfish!.proximity).toBeGreaterThan(bird!.proximity);
   });
 
-  it("maps hybrid raw score to player-facing heat", () => {
-    expect(computeHybridDisplayScore(1, true)).toBe(100);
-    expect(computeHybridDisplayScore(0.8)).toBeCloseTo(90.44, 1);
-    expect(computeHybridDisplayScore(0)).toBe(0);
+  it("maps calibrated display score to player-facing heat", () => {
+    const scored = [
+      { word: "目标", rawHybrid: 1 },
+      { word: "近", rawHybrid: 0.9 },
+      { word: "远", rawHybrid: 0.1 },
+    ];
+    const calibration = buildTargetDisplayCalibration(scored, "目标");
+
+    expect(mapCalibratedDisplayScore(1, calibration, true)).toBe(100);
+    expect(mapCalibratedDisplayScore(0.9, calibration)).toBeGreaterThan(0);
+    expect(mapCalibratedDisplayScore(0.1, calibration)).toBe(0);
   });
 });

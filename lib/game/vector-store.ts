@@ -2,7 +2,13 @@ import { readFileSync } from "fs";
 import path from "path";
 import targetWords from "../../data/target-words.json";
 import { computeHybridFeaturesWithContext } from "./hybrid-scorer";
-import { computeHybridDisplayScore, computeSimilarityCalibration, rankToPercentile } from "./scoring";
+import {
+  buildTargetDisplayCalibration,
+  mapCalibratedDisplayScore,
+  computeSimilarityCalibration,
+  rankToPercentile,
+  type TargetDisplayCalibration,
+} from "./scoring";
 import type { SimilarityCalibration } from "./types";
 import { semanticKnowledgeStore, type SemanticKnowledgeStore } from "./semantic-knowledge";
 import type { WordVectorEntry } from "./types";
@@ -34,6 +40,7 @@ type TargetRankingCache = {
   targetWord: string;
   scored: ScoredEntry[];
   rankByWord: Map<string, number>;
+  displayCalibration: TargetDisplayCalibration;
 };
 
 function magnitude(vector: ArrayLike<number>) {
@@ -185,6 +192,7 @@ export class VectorStore {
       targetWord,
       scored,
       rankByWord,
+      displayCalibration: buildTargetDisplayCalibration(scored, targetWord),
     };
 
     this.targetRankingCache.set(targetWord, ranking);
@@ -216,7 +224,11 @@ export class VectorStore {
         similarity: entry.similarity,
         rank,
         percentile: rankToPercentile(rank, ranking.scored.length),
-        proximity: computeHybridDisplayScore(entry.rawHybrid, entry.word === targetWord),
+        proximity: mapCalibratedDisplayScore(
+          entry.rawHybrid,
+          ranking.displayCalibration,
+          entry.word === targetWord,
+        ),
       };
     });
   }
@@ -250,7 +262,11 @@ export class VectorStore {
       similarity: guessScore.similarity,
       rank,
       percentile: rankToPercentile(rank, this.entries.length),
-      proximity: computeHybridDisplayScore(guessScore.rawHybrid, guess.word === targetWord),
+      proximity: mapCalibratedDisplayScore(
+        guessScore.rawHybrid,
+        ranking.displayCalibration,
+        guess.word === targetWord,
+      ),
     };
   }
 }

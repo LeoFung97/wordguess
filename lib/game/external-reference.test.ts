@@ -45,6 +45,46 @@ function describeExternalReference(reference: ExternalTargetSuite) {
   });
 }
 
+describe("display calibration on real targets", () => {
+  it("lands rank ~100 and rank ~1000 near intended UX bands", () => {
+    for (const target of [DOLPHIN_REFERENCE.target, STARRY_SKY_REFERENCE.target]) {
+      const ranked = vectorStore.rankedWordsAgainstTarget(target);
+      expect(ranked).toBeDefined();
+
+      const neighbors = ranked!.filter((entry) => entry.word !== target);
+      const rank100 = neighbors[99];
+      const rank1000 = neighbors[999];
+
+      expect(rank100).toBeDefined();
+      expect(rank1000).toBeDefined();
+      expect(rank100.proximity).toBeGreaterThanOrEqual(80);
+      expect(rank100.proximity).toBeLessThanOrEqual(86);
+      expect(rank1000.proximity).toBeGreaterThanOrEqual(52);
+      expect(rank1000.proximity).toBeLessThanOrEqual(58);
+    }
+  });
+
+  it("produces different top-neighbor display scores across targets", () => {
+    const dolphinNearest = vectorStore.calibrationForTarget(DOLPHIN_REFERENCE.target)?.nearest;
+    const starryNearest = vectorStore.calibrationForTarget(STARRY_SKY_REFERENCE.target)?.nearest;
+
+    expect(dolphinNearest).toBeDefined();
+    expect(starryNearest).toBeDefined();
+    expect(dolphinNearest).not.toBeCloseTo(starryNearest!, 0);
+  });
+
+  it("preserves ranking order after display calibration", () => {
+    for (const target of [DOLPHIN_REFERENCE.target, STARRY_SKY_REFERENCE.target]) {
+      const ranked = vectorStore.rankedWordsAgainstTarget(target);
+      expect(ranked).toBeDefined();
+
+      for (let index = 1; index < ranked!.length; index += 1) {
+        expect(ranked![index - 1].proximity).toBeGreaterThanOrEqual(ranked![index].proximity);
+      }
+    }
+  });
+});
+
 describeExternalReference(DOLPHIN_REFERENCE);
 describeExternalReference(STARRY_SKY_REFERENCE);
 
