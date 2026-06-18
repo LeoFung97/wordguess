@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { GuessForm } from "@/components/GuessForm";
 import { GuessHistory } from "@/components/GuessHistory";
-import { SimilarityCalibrationCard } from "@/components/SimilarityCalibrationCard";
 import { StatCard } from "@/components/StatCard";
 import type { CreateGameResult, PublicGameState } from "@/lib/game/types";
 
@@ -125,14 +124,8 @@ export default function PlayPage() {
           <p className="text-sm text-teal-100">单人模式</p>
           <h1 className="mt-3 text-4xl font-black text-white">找到隐藏的目标词</h1>
           <p className="mt-4 leading-7 text-white/60">
-            每次猜一个词库中的词。分数越高表示语义越接近，可参考左侧刻度判断你的猜测。
+            每次猜一个词库中的词。分数越高表示语义越接近。
           </p>
-
-          {game?.calibration ? (
-            <div className="mt-6">
-              <SimilarityCalibrationCard calibration={game.calibration} />
-            </div>
-          ) : null}
 
           <div className="mt-7 grid gap-4 sm:grid-cols-3 lg:grid-cols-1">
             <StatCard label="尝试次数" value={game?.attempts ?? 0} />

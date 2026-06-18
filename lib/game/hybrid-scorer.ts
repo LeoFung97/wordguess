@@ -12,12 +12,11 @@ export type HybridFeatureScores = {
 };
 
 export const HYBRID_WEIGHTS = {
-  embed: 0.62,
-  sememe: 0.12,
-  field: 0.08,
-  synonym: 0.08,
-  concept: 0.05,
-  graph: 0.05,
+  embed: 0.75,
+  sememe: 0.1,
+  graph: 0.07,
+  concept: 0.03,
+  synonym: 0.05,
 } as const;
 
 export function normalizeEmbedScore(cosineSimilarity: number) {
@@ -37,7 +36,6 @@ export function combineHybridScores(
   const rawHybrid =
     HYBRID_WEIGHTS.embed * embedScore +
     HYBRID_WEIGHTS.sememe * knowledge.sememeScore +
-    HYBRID_WEIGHTS.field * knowledge.fieldScore +
     HYBRID_WEIGHTS.synonym * knowledge.synonymScore +
     HYBRID_WEIGHTS.concept * knowledge.conceptScore +
     HYBRID_WEIGHTS.graph * knowledge.graphScore;

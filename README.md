@@ -7,7 +7,7 @@
 - 单人模式：独立猜一个隐藏的中文词。
 - 大厅模式：创建房间并分享链接，多人实时猜同一个目标词。
 - 现代中文界面：响应式布局、相似度进度条、冷热反馈、猜词历史。
-- Word2Vec 管线：使用腾讯 AI Lab 中文词向量（200 维）构建词语义词库。
+- fastText 管线：使用 Facebook fastText 中文词向量（300 维）与 SUBTLEX-CH 词频交集构建 5 万词语义词库。
 
 ## 开发
 
@@ -28,32 +28,44 @@ npm run build
 
 ## 准备词向量
 
-游戏使用腾讯 AI Lab 中文词向量（200 维）。默认使用 text2vec 提供的轻量版（约 14 万词）；如有官方全量文件也可切换。
+游戏使用 fastText 中文词向量（`cc.zh.300`，300 维）与 `data/raw/multi_domain_total_word_freq.txt` 词频表生成交集词库。
+
+支持的词频表格式：
+- 带表头：`token` + `count`（或 `Word` + `WCount`，tab/逗号分隔）
+- 无表头两列：`词\t频率`
+- 单列：每行一个词，越靠前越常见
 
 ```bash
-# 1. 下载轻量版腾讯词向量（111MB，ModelScope 镜像）
-curl -L -o data/raw/light_Tencent_AILab_ChineseEmbedding.bin \
-  "https://www.modelscope.cn/models/lili666/text2vec-word2vec-tencent-chinese/resolve/master/light_Tencent_AILab_ChineseEmbedding.bin"
+# 词频表已放在 data/raw/multi_domain_total_word_freq.txt
 
-# 2. 提取全部词条，生成运行时词库
-npm run prepare:tencent
-```
+# 下载 fastText 中文词向量（文本格式，约 1.2GB 压缩）
+curl -L -o data/raw/cc.zh.300.vec.gz \
+  "https://dl.fbaipublicfiles.com/fasttext/vectors-crawl/cc.zh.300.vec.gz"
 
-如有官方全量 `Tencent_AILab_ChineseEmbedding.txt`（约 880 万词条），可改用：
-
-```bash
-npm run prepare:tencent:full
+# 生成交集词库与向量（默认 50k，可改 80k 等）
+npm run prepare:fasttext
+npm run prepare:fasttext -- --top-k=80k
 ```
 
 预处理会：
 
-- 扫描腾讯词向量文件中的全部词条。
-- 保留数据集中的 1 到 4 字词（更长的词会被跳过）。
-- 默认只保留最常见的 10,000 个四字词，把总数据量控制在 100MB 以下；可用 `--max-four-char-words=0` 去掉全部四字词，或 `--max-four-char-words=17450` 尽量填满预算。
-- 跳过文件头与无效行。
-- 归一化向量，方便运行时快速计算余弦相似度。
+- 按词频表从高到低遍历。
+- 跳过不在 fastText 词表中的词，继续取下一个。
+- 直到凑满 `--top-k` 个有向量的词（如 `50k`、`80k`）。
+- 写入 `data/words.json` 与 `data/vectors.f32`。
 
 目标词仍由 `data/target-words.json` 控制（二字词）；猜词接受词库中 1 到 4 字的词。
+
+## 准备语义知识缓存
+
+在 `prepare:fasttext` 之后运行：
+
+```bash
+npm run prepare:semantic:setup
+npm run prepare:semantic
+```
+
+这会处理 `prepare:fasttext` 生成的全部词库（`data/words.json`），并用 fastText 余弦相似度生成近邻同义词边。词库大小由 `prepare:fasttext --top-k` 控制，semantic 不再单独筛词。
 
 `data/raw/` 和大体积原始模型文件默认不会进入 git。
 

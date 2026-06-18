@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Build OpenHowNet word cache + NetworkX semantic graph for hybrid scoring.
+Build OpenHowNet word cache + semantic graph for hybrid scoring.
 
-Run once after prepare:vectors (needs data/words.json):
+Run once after prepare:fasttext (needs data/words.json and data/vectors.f32):
 
   python3 -m venv .venv-semantic
   source .venv-semantic/bin/activate
@@ -20,12 +20,15 @@ import argparse
 import json
 import os
 import re
+import struct
 import sys
 import time
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import TypedDict
+
+import numpy as np
 
 try:
     import OpenHowNet
@@ -36,6 +39,7 @@ except ImportError as exc:
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_WORDS_PATH = ROOT / "data" / "words.json"
+DEFAULT_VECTORS_PATH = ROOT / "data" / "vectors.f32"
 DEFAULT_CACHE_PATH = ROOT / "data" / "semantic-word-cache.json"
 DEFAULT_GRAPH_PATH = ROOT / "data" / "semantic-graph.json"
 
@@ -68,18 +72,72 @@ class GraphEdge(TypedDict):
     w: float
 
 
+class EmbeddingIndex(TypedDict):
+    words: list[str]
+    vectors: np.ndarray
+    word_to_index: dict[str, int]
+
+
 _worker_hownet = None
-_worker_use_nearest = False
+_worker_embedding_index: EmbeddingIndex | None = None
 
 
-def load_vocabulary(path: Path, limit: int | None, content_only: bool) -> list[str]:
+def load_vocabulary(path: Path, content_only: bool) -> list[str]:
     entries = json.loads(path.read_text(encoding="utf-8"))
     words = [entry["word"] for entry in entries]
     if content_only:
         words = [word for word in words if CHINESE_RE.fullmatch(word)]
-    if limit is not None:
-        words = words[:limit]
     return words
+
+
+def load_embedding_index(words_path: Path, vectors_path: Path) -> EmbeddingIndex:
+    entries = json.loads(words_path.read_text(encoding="utf-8"))
+    words = [entry["word"] for entry in entries]
+    raw = vectors_path.read_bytes()
+    vector_count = len(raw) // struct.calcsize("<f")
+    if vector_count % len(words) != 0:
+        raise SystemExit("Vector data does not align with word metadata.")
+
+    vector_length = vector_count // len(words)
+    vectors = np.frombuffer(raw, dtype=np.float32).reshape(len(words), vector_length)
+    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    vectors = vectors / norms
+
+    return {
+        "words": words,
+        "vectors": vectors,
+        "word_to_index": {word: index for index, word in enumerate(words)},
+    }
+
+
+def embedding_nearest_neighbors(
+    word: str,
+    embedding_index: EmbeddingIndex,
+    vocabulary: set[str],
+    k: int = SYNONYM_K,
+) -> list[tuple[str, float]]:
+    word_to_index = embedding_index["word_to_index"]
+    source_index = word_to_index.get(word)
+    if source_index is None:
+        return []
+
+    vectors = embedding_index["vectors"]
+    scores = vectors @ vectors[source_index]
+    scores[source_index] = -1.0
+
+    ranked_indices = np.argpartition(scores, -k)[-k:]
+    ranked_indices = ranked_indices[np.argsort(scores[ranked_indices])[::-1]]
+
+    neighbors: list[tuple[str, float]] = []
+    for index in ranked_indices:
+        candidate = embedding_index["words"][int(index)]
+        score = float(scores[index])
+        if candidate == word or candidate not in vocabulary or score < NEAREST_MIN_SCORE:
+            continue
+        neighbors.append((candidate, score))
+
+    return neighbors
 
 
 def collect_tree_sememes(node: dict, collected: set[str], max_depth: int, depth: int = 0) -> None:
@@ -256,36 +314,16 @@ def extract_synonym_links(
     vocabulary: set[str],
     sememes: list[str],
     sememe_to_words: dict[str, list[str]],
-    use_nearest: bool,
+    embedding_index: EmbeddingIndex,
 ) -> list[tuple[str, float]]:
     links: dict[str, float] = {}
 
     for candidate in extract_sense_synonym_words(hownet, word, vocabulary):
         links[candidate] = min(links.get(candidate, 99.0), WEIGHT_SYNONYM_SENSE)
 
-    if use_nearest:
-        try:
-            nearest = (
-                hownet.get_nearest_words(
-                    word,
-                    language="zh",
-                    merge=True,
-                    K=SYNONYM_K,
-                    score=True,
-                )
-                or []
-            )
-            for item in nearest:
-                if isinstance(item, tuple):
-                    candidate, score = item
-                else:
-                    candidate, score = item, 1.0
-                if candidate == word or candidate not in vocabulary:
-                    continue
-                weight = nearest_link_weight(float(score))
-                links[candidate] = min(links.get(candidate, 99.0), weight)
-        except Exception:
-            pass
+    for candidate, score in embedding_nearest_neighbors(word, embedding_index, vocabulary):
+        weight = nearest_link_weight(score)
+        links[candidate] = min(links.get(candidate, 99.0), weight)
 
     for candidate, overlap, jaccard in build_ranked_sememe_synonyms(
         word,
@@ -321,10 +359,14 @@ def lookup_word_knowledge(hownet, word: str) -> WordKnowledge:
     }
 
 
-def _init_worker(use_nearest: bool) -> None:
-    global _worker_hownet, _worker_use_nearest
-    _worker_use_nearest = use_nearest
-    # Sense synonyms require the similarity tables even when --with-nearest is off.
+def _init_worker(embedding_index: EmbeddingIndex) -> None:
+    global _worker_hownet, _worker_embedding_index
+    _worker_embedding_index = embedding_index
+    _worker_hownet = OpenHowNet.HowNetDict(init_sim=True)
+
+
+def _init_hownet_worker() -> None:
+    global _worker_hownet
     _worker_hownet = OpenHowNet.HowNetDict(init_sim=True)
 
 
@@ -334,11 +376,12 @@ def _lookup_words_chunk(words: list[str]) -> list[tuple[str, WordKnowledge]]:
 
 
 def _synonyms_for_chunk(
-    payload: tuple[list[str], dict[str, list[str]], list[str], bool],
+    payload: tuple[list[str], dict[str, list[str]], list[str]],
 ) -> list[tuple[str, list[tuple[str, float]]]]:
-    words, sememe_to_words, vocabulary_list, use_nearest = payload
+    words, sememe_to_words, vocabulary_list = payload
     vocabulary = set(vocabulary_list)
     assert _worker_hownet is not None
+    assert _worker_embedding_index is not None
     results: list[tuple[str, list[tuple[str, float]]]] = []
     for word in words:
         sememes = sememe_to_words.get(f"__sememes__:{word}")
@@ -353,7 +396,7 @@ def _synonyms_for_chunk(
                     vocabulary,
                     sememes,
                     sememe_to_words,
-                    use_nearest,
+                    _worker_embedding_index,
                 ),
             )
         )
@@ -383,11 +426,9 @@ def chunk_words(words: list[str], chunk_size: int) -> list[list[str]]:
     return [words[index : index + chunk_size] for index in range(0, len(words), chunk_size)]
 
 
-def default_workers(use_nearest: bool, requested: int | None) -> int:
+def default_workers(requested: int | None) -> int:
     if requested is not None:
         return max(1, requested)
-    if use_nearest:
-        return max(1, min(8, CPU_COUNT))
     return max(1, CPU_COUNT)
 
 
@@ -428,7 +469,7 @@ def parallel_map(
 def build_word_cache_parallel(
     words: list[str],
     vocabulary: set[str],
-    use_nearest: bool,
+    embedding_index: EmbeddingIndex,
     workers: int,
     chunk_size: int,
 ) -> dict[str, WordKnowledge]:
@@ -439,7 +480,7 @@ def build_word_cache_parallel(
     with ProcessPoolExecutor(
         max_workers=workers,
         initializer=_init_worker,
-        initargs=(use_nearest,),
+        initargs=(embedding_index,),
     ) as executor:
         for chunk_result in parallel_map(
             executor,
@@ -458,9 +499,7 @@ def build_word_cache_parallel(
             for sememe in knowledge["sememes"]:
                 sememe_to_words.setdefault(sememe, []).append(word)
 
-        synonym_chunks = [
-            (chunk, sememe_to_words, list(vocabulary), use_nearest) for chunk in chunks
-        ]
+        synonym_chunks = [(chunk, sememe_to_words, list(vocabulary)) for chunk in chunks]
         print(
             f"  Synonym pass: {len(words)} words, {len(chunks)} chunks, {workers} workers",
             file=sys.stderr,
@@ -483,7 +522,7 @@ def build_word_cache_serial(
     hownet,
     words: list[str],
     vocabulary: set[str],
-    use_nearest: bool,
+    embedding_index: EmbeddingIndex,
 ) -> dict[str, WordKnowledge]:
     cache: dict[str, WordKnowledge] = {}
     sememe_to_words: dict[str, list[str]] = {}
@@ -507,7 +546,7 @@ def build_word_cache_serial(
                 vocabulary,
                 cache[word]["sememes"],
                 sememe_to_words,
-                use_nearest,
+                embedding_index,
             ),
         )
 
@@ -551,8 +590,7 @@ def collect_graph_edges(
 
     with ProcessPoolExecutor(
         max_workers=workers,
-        initializer=_init_worker,
-        initargs=(False,),
+        initializer=_init_hownet_worker,
     ) as executor:
         for chunk_edges in parallel_map(
             executor,
@@ -584,9 +622,9 @@ def export_graph(edges: list[GraphEdge]) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Prepare OpenHowNet cache and semantic graph.")
     parser.add_argument("--words", type=Path, default=DEFAULT_WORDS_PATH)
+    parser.add_argument("--vectors", type=Path, default=DEFAULT_VECTORS_PATH)
     parser.add_argument("--cache-output", type=Path, default=DEFAULT_CACHE_PATH)
     parser.add_argument("--graph-output", type=Path, default=DEFAULT_GRAPH_PATH)
-    parser.add_argument("--limit", type=int, default=None, help="Process only the first N vocabulary words.")
     parser.add_argument(
         "--content-only",
         action="store_true",
@@ -599,18 +637,10 @@ def main() -> None:
         help="Include punctuation and non-Chinese tokens from words.json.",
     )
     parser.add_argument(
-        "--with-nearest",
-        action="store_true",
-        help=(
-            "Also merge OpenHowNet nearest-word neighbors into synonym edges "
-            "(slower; sense synonyms are always included)."
-        ),
-    )
-    parser.add_argument(
         "--workers",
         type=int,
         default=None,
-        help=f"Parallel worker processes (default: {CPU_COUNT}, or 8 with --with-nearest).",
+        help=f"Parallel worker processes (default: {CPU_COUNT}).",
     )
     parser.add_argument(
         "--chunk-size",
@@ -627,31 +657,35 @@ def main() -> None:
 
     if not args.words.exists():
         raise SystemExit(f"Missing vocabulary file: {args.words}")
+    if not args.vectors.exists():
+        raise SystemExit(f"Missing vector file: {args.vectors}")
 
-    workers = default_workers(args.with_nearest, args.workers)
+    workers = default_workers(args.workers)
     started = time.perf_counter()
 
     print("Downloading OpenHowNet resources if needed...")
     OpenHowNet.download()
 
-    words = load_vocabulary(args.words, args.limit, args.content_only and not args.all_tokens)
+    embedding_index = load_embedding_index(args.words, args.vectors)
+    words = load_vocabulary(args.words, args.content_only and not args.all_tokens)
     vocabulary = set(words)
     print(
         f"Building word cache for {len(words)} words "
-        f"({'serial' if args.serial else f'{workers} workers, chunk={args.chunk_size}'})..."
+        f"({'serial' if args.serial else f'{workers} workers, chunk={args.chunk_size}'}) "
+        f"using fastText nearest neighbors..."
     )
 
     if args.serial:
         print("Initializing OpenHowNet (with similarity tables for sense synonyms)...")
         hownet = OpenHowNet.HowNetDict(init_sim=True)
-        word_cache = build_word_cache_serial(hownet, words, vocabulary, args.with_nearest)
+        word_cache = build_word_cache_serial(hownet, words, vocabulary, embedding_index)
         print("Building semantic graph...")
         edges = collect_graph_edges(words, word_cache, vocabulary, workers=1)
     else:
         word_cache = build_word_cache_parallel(
             words,
             vocabulary,
-            args.with_nearest,
+            embedding_index,
             workers,
             args.chunk_size,
         )

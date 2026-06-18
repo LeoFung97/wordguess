@@ -64,24 +64,24 @@ describe("vector helpers", () => {
   it("builds semantle-style calibration anchors from ranked words", () => {
     const ranked = [
       { word: "目标", proximity: 100 },
-      { word: "最近", proximity: 78.26 },
-      { word: "第二", proximity: 70 },
-      { word: "第三", proximity: 65 },
-      { word: "第四", proximity: 60 },
-      { word: "第五", proximity: 58 },
-      { word: "第六", proximity: 56 },
-      { word: "第七", proximity: 55 },
-      { word: "第八", proximity: 54 },
-      { word: "第九", proximity: 53.5 },
-      { word: "第十", proximity: 52.81 },
-      { word: "更远", proximity: 19.76 },
+      { word: "最近", proximity: 95 },
+      { word: "第二", proximity: 92 },
+      { word: "第三", proximity: 90 },
+      { word: "第四", proximity: 88 },
+      { word: "第五", proximity: 86 },
+      { word: "第六", proximity: 85 },
+      { word: "第七", proximity: 84 },
+      { word: "第八", proximity: 83.5 },
+      { word: "第九", proximity: 83.2 },
+      { word: "第十", proximity: 83 },
+      { word: "更远", proximity: 55 },
     ];
 
     const calibration = computeSimilarityCalibration(ranked, "目标");
 
-    expect(calibration.nearest).toBeCloseTo(78.26);
-    expect(calibration.tenth).toBeCloseTo(52.81);
-    expect(calibration.thousandth).toBeCloseTo(19.76);
+    expect(calibration.nearest).toBeCloseTo(95);
+    expect(calibration.tenth).toBeCloseTo(83);
+    expect(calibration.thousandth).toBeCloseTo(55);
   });
 });
 
