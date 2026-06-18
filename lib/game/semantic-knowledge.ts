@@ -1,5 +1,13 @@
 import { existsSync, readFileSync } from "fs";
 import path from "path";
+import { targetCacheLimit } from "./cache-config";
+import { LruCache } from "./lru-cache";
+import { normalizeKnowledge } from "./semantic-binary-constants";
+import {
+  parseWordCacheJson,
+  SemanticGraphBinary,
+  SemanticWordCacheBinary,
+} from "./semantic-binary";
 
 export type SemanticDomain =
   | "weather/climate"
@@ -45,7 +53,7 @@ export type TargetScoringContext = {
   targetConcepts: Set<string>;
   targetDomain: SemanticDomain;
   targetUsageBias: UsageBias;
-  distances: Map<string, number>;
+  distanceTo: (word: string) => number | undefined;
 };
 
 type GraphEdge = {
@@ -59,14 +67,10 @@ type AdjacencyEntry = {
   weight: number;
 };
 
-type RawWordKnowledge = Partial<WordKnowledge> & {
-  sememes?: string[];
-  synonyms?: string[];
-  concepts?: string[];
-};
-
-const cachePath = path.join(process.cwd(), "data", "semantic-word-cache.json");
-const graphPath = path.join(process.cwd(), "data", "semantic-graph.json");
+const cacheJsonPath = path.join(process.cwd(), "data", "semantic-word-cache.json");
+const graphJsonPath = path.join(process.cwd(), "data", "semantic-graph.json");
+const cacheBinaryPath = path.join(process.cwd(), "data", "semantic-word-cache.bin");
+const graphBinaryPath = path.join(process.cwd(), "data", "semantic-graph.bin");
 
 const EMPTY_KNOWLEDGE: WordKnowledge = {
   sememes: [],
@@ -176,20 +180,53 @@ function toSet(values: readonly string[]) {
   return new Set(values);
 }
 
-function normalizeKnowledge(raw: RawWordKnowledge): WordKnowledge {
-  const core = raw.core_sememes ?? raw.sememes ?? [];
-  const expanded = raw.expanded_sememes ?? [];
-  const sememes = raw.sememes ?? [...core, ...expanded.filter((item) => !core.includes(item))];
+function loadWordCacheMap(): Map<string, WordKnowledge> {
+  if (!existsSync(cacheJsonPath)) {
+    return new Map();
+  }
+
+  return parseWordCacheJson(JSON.parse(readFileSync(cacheJsonPath, "utf8")));
+}
+
+function loadAdjacency(): Map<string, AdjacencyEntry[]> {
+  const adjacency = new Map<string, AdjacencyEntry[]>();
+
+  if (!existsSync(graphJsonPath)) {
+    return adjacency;
+  }
+
+  const raw = JSON.parse(readFileSync(graphJsonPath, "utf8")) as { edges?: GraphEdge[] };
+  for (const edge of raw.edges ?? []) {
+    const left = adjacency.get(edge.a) ?? [];
+    left.push({ node: edge.b, weight: edge.w });
+    adjacency.set(edge.a, left);
+
+    const right = adjacency.get(edge.b) ?? [];
+    right.push({ node: edge.a, weight: edge.w });
+    adjacency.set(edge.b, right);
+  }
+
+  return adjacency;
+}
+
+function loadSemanticBackends() {
+  const wordBinary = existsSync(cacheBinaryPath) ? SemanticWordCacheBinary.tryLoad(cacheBinaryPath) : undefined;
+  const graphBinary = existsSync(graphBinaryPath) ? SemanticGraphBinary.tryLoad(graphBinaryPath) : undefined;
+
+  if (wordBinary && graphBinary) {
+    return {
+      wordBinary,
+      graphBinary,
+      wordCache: undefined as Map<string, WordKnowledge> | undefined,
+      adjacency: undefined as Map<string, AdjacencyEntry[]> | undefined,
+    };
+  }
 
   return {
-    sememes,
-    synonyms: raw.synonyms ?? [],
-    concepts: raw.concepts ?? [],
-    core_sememes: core,
-    expanded_sememes: expanded,
-    domain: raw.domain ?? "abstract/general",
-    usage_bias: raw.usage_bias ?? "unknown",
-    sense_count: raw.sense_count ?? 0,
+    wordBinary: undefined,
+    graphBinary: undefined,
+    wordCache: loadWordCacheMap(),
+    adjacency: loadAdjacency(),
   };
 }
 
@@ -345,75 +382,42 @@ function synonymRelationScore(
   return jaccardFromSets(targetSynonyms, guessSynonyms);
 }
 
-function parseCachePayload(raw: unknown): Map<string, WordKnowledge> {
-  const cache = new Map<string, WordKnowledge>();
-
-  if (!raw || typeof raw !== "object") {
-    return cache;
-  }
-
-  const record = raw as Record<string, RawWordKnowledge | { schema_version?: number }>;
-
-  if ("words" in record && record.words && typeof record.words === "object") {
-    for (const [word, knowledge] of Object.entries(record.words as Record<string, RawWordKnowledge>)) {
-      cache.set(word, normalizeKnowledge(knowledge));
-    }
-    return cache;
-  }
-
-  for (const [word, knowledge] of Object.entries(record)) {
-    if (word === "__meta__" || !knowledge || typeof knowledge !== "object") {
-      continue;
-    }
-    cache.set(word, normalizeKnowledge(knowledge as RawWordKnowledge));
-  }
-
-  return cache;
-}
-
-function loadWordCache(): Map<string, WordKnowledge> {
-  if (!existsSync(cachePath)) {
-    return new Map();
-  }
-
-  const raw = JSON.parse(readFileSync(cachePath, "utf8"));
-  return parseCachePayload(raw);
-}
-
-function loadAdjacency(): Map<string, AdjacencyEntry[]> {
-  const adjacency = new Map<string, AdjacencyEntry[]>();
-
-  if (!existsSync(graphPath)) {
-    return adjacency;
-  }
-
-  const raw = JSON.parse(readFileSync(graphPath, "utf8")) as { edges?: GraphEdge[] };
-  for (const edge of raw.edges ?? []) {
-    const left = adjacency.get(edge.a) ?? [];
-    left.push({ node: edge.b, weight: edge.w });
-    adjacency.set(edge.a, left);
-
-    const right = adjacency.get(edge.b) ?? [];
-    right.push({ node: edge.a, weight: edge.w });
-    adjacency.set(edge.b, right);
-  }
-
-  return adjacency;
-}
-
 export class SemanticKnowledgeStore {
-  private readonly wordCache: Map<string, WordKnowledge>;
-  private readonly adjacency: Map<string, AdjacencyEntry[]>;
+  private readonly wordBinary?: SemanticWordCacheBinary;
+  private readonly graphBinary?: SemanticGraphBinary;
+  private readonly wordCache?: Map<string, WordKnowledge>;
+  private readonly adjacency?: Map<string, AdjacencyEntry[]>;
   private readonly lookupCache = new Map<string, WordKnowledge>();
-  private readonly distanceCache = new Map<string, Map<string, number>>();
-  private readonly targetContextCache = new Map<string, TargetScoringContext>();
+  private readonly targetContextCache = new LruCache<string, TargetScoringContext>(targetCacheLimit());
 
   readonly available: boolean;
 
-  constructor(wordCache?: Map<string, WordKnowledge>, adjacency?: Map<string, AdjacencyEntry[]>) {
-    this.wordCache = wordCache ?? loadWordCache();
-    this.adjacency = adjacency ?? loadAdjacency();
-    this.available = this.wordCache.size > 0 || this.adjacency.size > 0;
+  constructor(
+    wordCache?: Map<string, WordKnowledge>,
+    adjacency?: Map<string, AdjacencyEntry[]>,
+    options: { wordBinary?: SemanticWordCacheBinary; graphBinary?: SemanticGraphBinary } = {},
+  ) {
+    if (wordCache || adjacency) {
+      this.wordCache = wordCache ?? new Map();
+      this.adjacency = adjacency ?? new Map();
+      this.available = this.wordCache.size > 0 || this.adjacency.size > 0;
+      return;
+    }
+
+    const backends = loadSemanticBackends();
+    this.wordBinary = options.wordBinary ?? backends.wordBinary;
+    this.graphBinary = options.graphBinary ?? backends.graphBinary;
+    this.wordCache = backends.wordCache;
+    this.adjacency = backends.adjacency;
+    this.available =
+      Boolean(this.wordBinary?.size) ||
+      Boolean(this.graphBinary) ||
+      (this.wordCache?.size ?? 0) > 0 ||
+      (this.adjacency?.size ?? 0) > 0;
+  }
+
+  evictTarget(targetWord: string) {
+    this.targetContextCache.delete(targetWord);
   }
 
   getWordKnowledge(word: string): WordKnowledge {
@@ -422,9 +426,60 @@ export class SemanticKnowledgeStore {
       return cached;
     }
 
-    const knowledge = normalizeKnowledge(this.wordCache.get(word) ?? EMPTY_KNOWLEDGE);
+    const knowledge = this.wordBinary
+      ? normalizeKnowledge(this.wordBinary.getWordKnowledge(word) ?? EMPTY_KNOWLEDGE)
+      : normalizeKnowledge(this.wordCache?.get(word) ?? EMPTY_KNOWLEDGE);
     this.lookupCache.set(word, knowledge);
     return knowledge;
+  }
+
+  private shortestDistance(source: string, target: string) {
+    if (source === target) {
+      return 0;
+    }
+
+    if (this.graphBinary) {
+      return this.graphBinary.shortestDistance(source, target);
+    }
+
+    const adjacency = this.adjacency;
+    if (!adjacency?.has(source)) {
+      return undefined;
+    }
+
+    const distances = new Map<string, number>();
+    const settled = new Set<string>();
+    const heap = new MinHeap();
+    heap.push(source, 0);
+
+    while (heap.size > 0) {
+      const current = heap.pop();
+      if (!current || settled.has(current.node)) {
+        continue;
+      }
+
+      settled.add(current.node);
+      distances.set(current.node, current.priority);
+
+      if (current.node === target) {
+        return current.priority;
+      }
+
+      for (const neighbor of adjacency.get(current.node) ?? []) {
+        if (settled.has(neighbor.node)) {
+          continue;
+        }
+
+        const nextDistance = current.priority + neighbor.weight;
+        const known = distances.get(neighbor.node);
+        if (known === undefined || nextDistance < known) {
+          distances.set(neighbor.node, nextDistance);
+          heap.push(neighbor.node, nextDistance);
+        }
+      }
+    }
+
+    return undefined;
   }
 
   createTargetContext(targetWord: string): TargetScoringContext {
@@ -447,7 +502,7 @@ export class SemanticKnowledgeStore {
       targetConcepts: toSet(targetKnowledge.concepts),
       targetDomain: targetKnowledge.domain ?? "abstract/general",
       targetUsageBias: targetKnowledge.usage_bias ?? "unknown",
-      distances: this.dijkstra(targetWord),
+      distanceTo: (word: string) => this.shortestDistance(targetWord, word),
     };
 
     this.targetContextCache.set(targetWord, context);
@@ -473,7 +528,7 @@ export class SemanticKnowledgeStore {
       guessCore,
     );
 
-    const pathDistance = targetContext.distances.get(guessWord);
+    const pathDistance = targetContext.distanceTo(guessWord);
     let graphScore = pathDistance === undefined ? 0 : 1 / (1 + pathDistance);
 
     const coreOverlap = jaccardFromSets(targetContext.targetCoreSememes, guessCore);
@@ -541,53 +596,8 @@ export class SemanticKnowledgeStore {
     return jaccardFromSets(toSet(target.concepts), toSet(guess.concepts));
   }
 
-  private dijkstra(source: string) {
-    const cached = this.distanceCache.get(source);
-    if (cached) {
-      return cached;
-    }
-
-    const distances = new Map<string, number>();
-    const settled = new Set<string>();
-    const heap = new MinHeap();
-
-    if (!this.adjacency.has(source)) {
-      this.distanceCache.set(source, distances);
-      return distances;
-    }
-
-    heap.push(source, 0);
-
-    while (heap.size > 0) {
-      const current = heap.pop();
-      if (!current || settled.has(current.node)) {
-        continue;
-      }
-
-      settled.add(current.node);
-      distances.set(current.node, current.priority);
-
-      for (const neighbor of this.adjacency.get(current.node) ?? []) {
-        if (settled.has(neighbor.node)) {
-          continue;
-        }
-
-        const nextDistance = current.priority + neighbor.weight;
-        const known = distances.get(neighbor.node);
-        if (known === undefined || nextDistance < known) {
-          distances.set(neighbor.node, nextDistance);
-          heap.push(neighbor.node, nextDistance);
-        }
-      }
-    }
-
-    this.distanceCache.set(source, distances);
-    return distances;
-  }
-
   graphScore(targetWord: string, guessWord: string) {
-    const context = this.createTargetContext(targetWord);
-    const pathDistance = context.distances.get(guessWord);
+    const pathDistance = this.shortestDistance(targetWord, guessWord);
     if (pathDistance === undefined) {
       return 0;
     }
