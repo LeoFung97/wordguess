@@ -58,7 +58,11 @@ export class SemanticWordCacheBinary {
       return undefined;
     }
 
-    return new SemanticWordCacheBinary(readFileSync(filePath));
+    try {
+      return new SemanticWordCacheBinary(readFileSync(filePath));
+    } catch {
+      return undefined;
+    }
   }
 
   get size() {
@@ -263,7 +267,11 @@ export class SemanticGraphBinary {
       return undefined;
     }
 
-    return new SemanticGraphBinary(readFileSync(filePath));
+    try {
+      return new SemanticGraphBinary(readFileSync(filePath));
+    } catch {
+      return undefined;
+    }
   }
 
   private readNodeName(nodeId: number) {
