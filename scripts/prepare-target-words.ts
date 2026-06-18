@@ -15,7 +15,7 @@ import { mergeTargetSelectionConfig } from "../lib/game/target-selection/config"
 import { loadEmbeddingIndex } from "../lib/game/target-selection/embedding-index";
 import { loadSemanticKnowledge, runTargetSelectionPipeline } from "../lib/game/target-selection/pipeline";
 import type { TargetSelectionConfig } from "../lib/game/target-selection/types";
-import { loadFrequencyEntries } from "./frequency-list";
+import { loadFrequencyEntries } from "../lib/game/frequency-list";
 
 const toSimplified = Converter({ from: "tw", to: "cn" });
 

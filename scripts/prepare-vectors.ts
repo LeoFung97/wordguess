@@ -6,7 +6,7 @@ import {
   parseCount,
   selectWordsByFrequency,
   type FrequencyEntry,
-} from "./frequency-list";
+} from "../lib/game/frequency-list";
 import { loadFastTextVectors, loadFastTextVocabulary, normalizeVector, toFloat32Buffer } from "./prepare-vectors-lib";
 
 type PreparedEntry = {

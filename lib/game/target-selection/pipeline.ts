@@ -1,5 +1,5 @@
 import { readFileSync } from "fs";
-import type { FrequencyEntry } from "../../scripts/frequency-list";
+import type { FrequencyEntry } from "../frequency-list";
 import { mergeTargetSelectionConfig } from "./config";
 import type { EmbeddingIndex } from "./embedding-index";
 import { applyHardFilters, guessPosHeuristic, scorePlayability } from "./heuristics";
