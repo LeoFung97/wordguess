@@ -13,4 +13,5 @@ if [[ ! -x "$PYTHON" ]]; then
 fi
 
 echo "Semantic prep: all words in data/words.json"
-exec "$PYTHON" "$SCRIPT" --content-only --workers 24 --chunk-size 512 "$@"
+"$PYTHON" "$SCRIPT" --content-only --workers 24 --chunk-size 512 "$@"
+npm run prepare:semantic:binary

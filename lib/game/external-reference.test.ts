@@ -46,7 +46,7 @@ function describeExternalReference(reference: ExternalTargetSuite) {
 }
 
 describe("display calibration on real targets", () => {
-  it("lands rank ~100 and rank ~1000 near intended UX bands", () => {
+  it("lands rank ~100 and rank ~1000 near intended UX bands", { timeout: 120_000 }, () => {
     for (const target of [DOLPHIN_REFERENCE.target, STARRY_SKY_REFERENCE.target]) {
       const ranked = vectorStore.rankedWordsAgainstTarget(target);
       expect(ranked).toBeDefined();

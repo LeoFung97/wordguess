@@ -13,6 +13,9 @@ pnpm-debug.log*
 data/raw
 data/generated
 data/*.bin
+!data/semantic-word-cache.bin
+!data/semantic-graph.bin
+!data/target-rankings.bin
 data/*.tar.gz
 data/*.txt
 data/*.vec
