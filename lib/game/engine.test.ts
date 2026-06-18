@@ -164,6 +164,7 @@ describe("game engine", () => {
     expect(result.guess.word).not.toBe("朋友");
     expect(result.guess.playerName).toBe("提示");
     expect(result.state.guesses).toHaveLength(1);
+    expect(result.guess.proximity).toBeLessThan(90);
   });
 
   it("formats negative similarities as zero", () => {

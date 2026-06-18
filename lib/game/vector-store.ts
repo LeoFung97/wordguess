@@ -310,38 +310,34 @@ export class VectorStore {
     }
 
     const ranking = this.resolveTargetRanking(target.word, target.vector);
-    const startRank = Math.max(1, options.minRank);
+    const startRank = Math.min(Math.max(2, options.minRank), ranking.vocabularySize);
 
-    for (const wordIndex of ranking.hintWordIndices) {
+    const tryRank = (rank: number) => {
+      const wordIndex = ranking.wordIndexByRank[rank];
+      if (wordIndex === undefined) {
+        return undefined;
+      }
+
       const entry = this.entries[wordIndex];
-      if (!entry) {
-        continue;
-      }
-
-      const rank = ranking.rankForIndex(wordIndex);
-      if (rank === undefined || rank < startRank) {
-        continue;
-      }
-
-      if (entry.word === targetWord || options.guessedWords.has(entry.word)) {
-        continue;
+      if (!entry || entry.word === targetWord || options.guessedWords.has(entry.word)) {
+        return undefined;
       }
 
       return this.toRankedWord(ranking, this.scoreEntry(target.word, target.vector, entry), rank);
+    };
+
+    for (let rank = startRank; rank <= ranking.vocabularySize; rank += 1) {
+      const hint = tryRank(rank);
+      if (hint) {
+        return hint;
+      }
     }
 
-    for (const wordIndex of ranking.hintWordIndices) {
-      const entry = this.entries[wordIndex];
-      if (!entry) {
-        continue;
+    for (let rank = 2; rank < startRank; rank += 1) {
+      const hint = tryRank(rank);
+      if (hint) {
+        return hint;
       }
-
-      const rank = ranking.rankForIndex(wordIndex);
-      if (rank === undefined || entry.word === targetWord || options.guessedWords.has(entry.word)) {
-        continue;
-      }
-
-      return this.toRankedWord(ranking, this.scoreEntry(target.word, target.vector, entry), rank);
     }
 
     return undefined;

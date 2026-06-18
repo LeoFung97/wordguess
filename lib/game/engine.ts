@@ -9,6 +9,8 @@ type GameSession = {
   solved: boolean;
 };
 
+const DEFAULT_FIRST_HINT_RANK = 1000;
+
 function proximityToTemperature(proximity: number, isCorrect: boolean): GuessTemperature {
   if (isCorrect) {
     return "solved";
@@ -196,8 +198,11 @@ export class GameEngine {
     }
 
     const guessedWords = new Set(session.guesses.map((guess) => guess.word));
-    const bestRank = bestGuess(session.guesses)?.rank ?? Number.MAX_SAFE_INTEGER;
-    const targetRank = Math.max(2, Math.floor(bestRank * 0.6));
+    const bestRank = bestGuess(session.guesses)?.rank;
+    const targetRank =
+      bestRank === undefined
+        ? DEFAULT_FIRST_HINT_RANK
+        : Math.max(2, Math.floor(bestRank * 0.6));
     const hint = this.store.pickHintAgainstTarget(session.targetWord, {
       guessedWords,
       minRank: targetRank,
