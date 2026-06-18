@@ -41,7 +41,7 @@ export function readMagic(buffer: Buffer, offset: number, length: number) {
   return buffer.toString("ascii", offset, offset + length);
 }
 
-export function compareUtf8(a: Buffer, b: Buffer) {
+export function compareUtf8(a: Uint8Array, b: Uint8Array) {
   const length = Math.min(a.length, b.length);
   for (let index = 0; index < length; index += 1) {
     if (a[index] < b[index]) {
@@ -63,7 +63,7 @@ export function compareUtf8(a: Buffer, b: Buffer) {
   return 0;
 }
 
-export function lowerBoundUtf8(keys: Buffer, keyWidth: number, count: number, needle: Buffer) {
+export function lowerBoundUtf8(keys: Uint8Array, keyWidth: number, count: number, needle: Uint8Array) {
   let low = 0;
   let high = count;
 
@@ -82,7 +82,7 @@ export function lowerBoundUtf8(keys: Buffer, keyWidth: number, count: number, ne
 }
 
 export class StringPoolWriter {
-  private readonly chunks: Buffer[] = [];
+  private readonly chunks: Uint8Array[] = [];
   private readonly offsets = new Map<string, number>();
   private length = 0;
 
