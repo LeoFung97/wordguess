@@ -12,18 +12,40 @@ function calibrationAt(proximities: number[], index: number) {
   return proximities[Math.min(index, proximities.length - 1)] ?? 0;
 }
 
+function calibrationFromProximities(proximities: number[]): SimilarityCalibration {
+  return {
+    nearest: calibrationAt(proximities, 0),
+    tenth: calibrationAt(proximities, 9),
+    thousandth: calibrationAt(proximities, 999),
+  };
+}
+
 /** Semantle-style reference anchors for the current target (excludes the answer). */
 export function computeSimilarityCalibration(
   ranked: { word: string; proximity: number }[],
   targetWord: string,
 ): SimilarityCalibration {
   const proximities = ranked.filter((entry) => entry.word !== targetWord).map((entry) => entry.proximity);
+  return calibrationFromProximities(proximities);
+}
 
-  return {
-    nearest: calibrationAt(proximities, 0),
-    tenth: calibrationAt(proximities, 9),
-    thousandth: calibrationAt(proximities, 999),
-  };
+/** Builds calibration from sorted neighbor scores without materializing full ranked lists. */
+export function calibrationFromScoredNeighbors(
+  scored: Array<{ word: string; rawHybrid: number }>,
+  targetWord: string,
+  displayCalibration: TargetDisplayCalibration,
+): SimilarityCalibration {
+  const proximities: number[] = [];
+
+  for (const entry of scored) {
+    if (entry.word === targetWord) {
+      continue;
+    }
+
+    proximities.push(mapCalibratedDisplayScore(entry.rawHybrid, displayCalibration, false));
+  }
+
+  return calibrationFromProximities(proximities);
 }
 
 export function rankToPercentile(rank: number, totalWords: number) {

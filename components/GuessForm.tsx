@@ -38,13 +38,13 @@ export function GuessForm({
     }
 
     setFormError("");
-    setWord(simplifiedWord);
+    setWord("");
     setIsSubmitting(true);
+    inputRef.current?.focus();
     try {
       const result = await onGuess(simplifiedWord);
-      if (result !== false) {
-        setWord("");
-        inputRef.current?.focus();
+      if (result === false) {
+        setWord(simplifiedWord);
       }
     } finally {
       setIsSubmitting(false);

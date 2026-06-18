@@ -12,7 +12,10 @@
     "prepare:fasttext": "tsx scripts/prepare-vectors.ts --frequency=data/raw/multi_domain_total_word_freq.txt --input=data/raw/cc.zh.300.vec.gz --words-output=data/words.json --vectors-output=data/vectors.f32",
     "prepare:subtlex": "bash scripts/download-subtlex.sh",
     "prepare:semantic": "bash scripts/prepare-semantic.sh",
-    "prepare:semantic:setup": "python3 -m venv .venv-semantic && .venv-semantic/bin/pip install -r requirements-semantic.txt"
+    "prepare:semantic:setup": "python3 -m venv .venv-semantic && .venv-semantic/bin/pip install -r requirements-semantic.txt",
+    "test:semantic": "python3 scripts/test-semantic-knowledge.py",
+    "prepare:targets": "tsx scripts/prepare-target-words.ts",
+    "prepare:targets:write": "tsx scripts/prepare-target-words.ts --write-target-words"
   },
   "dependencies": {
     "@next/eslint-plugin-next": "latest",

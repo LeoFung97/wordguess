@@ -162,6 +162,29 @@ export default function LobbyPage() {
           return;
         }
 
+        setRoom((current) => {
+          if (!current || current.roomCode !== room.roomCode) {
+            return current;
+          }
+
+          if (current.guesses.some((guess) => guess.word === result.data.guess.word)) {
+            return current;
+          }
+
+          const guesses = [...current.guesses, result.data.guess];
+          const bestGuess =
+            !current.bestGuess || result.data.guess.proximity > current.bestGuess.proximity
+              ? result.data.guess
+              : current.bestGuess;
+
+          return {
+            ...current,
+            guesses,
+            bestGuess,
+            attempts: guesses.length,
+            solved: current.solved || result.data.guess.isCorrect,
+          };
+        });
         resolve(true);
       });
     });
@@ -196,7 +219,32 @@ export default function LobbyPage() {
       setIsHinting(false);
       if (!result.ok) {
         setError(result.error);
+        return;
       }
+
+      setRoom((current) => {
+        if (!current || current.roomCode !== room.roomCode) {
+          return current;
+        }
+
+        if (current.guesses.some((guess) => guess.word === result.data.guess.word)) {
+          return current;
+        }
+
+        const guesses = [...current.guesses, result.data.guess];
+        const bestGuess =
+          !current.bestGuess || result.data.guess.proximity > current.bestGuess.proximity
+            ? result.data.guess
+            : current.bestGuess;
+
+        return {
+          ...current,
+          guesses,
+          bestGuess,
+          attempts: guesses.length,
+          solved: current.solved || result.data.guess.isCorrect,
+        };
+      });
     });
   }
 
