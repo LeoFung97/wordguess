@@ -57,7 +57,11 @@ export class TargetRankingsStore {
       return undefined;
     }
 
-    return new TargetRankingsStore(readFileSync(filePath));
+    try {
+      return new TargetRankingsStore(readFileSync(filePath));
+    } catch {
+      return undefined;
+    }
   }
 
   get vocabularySize() {
